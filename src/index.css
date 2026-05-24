@@ -1,0 +1,96 @@
+:root {
+  --bg:       #080D1A;
+  --bg-2:     #0F1629;
+  --bg-3:     #162040;
+  --bg-4:     #1E2D52;
+  --border:   rgba(255,255,255,0.07);
+  --border-2: rgba(255,255,255,0.13);
+  --accent:        #00E5A0;
+  --accent-dim:    rgba(0,229,160,0.08);
+  --accent-border: rgba(0,229,160,0.25);
+  --text-1: #F1F5F9;
+  --text-2: #94A3B8;
+  --text-3: #475569;
+  --pending:     #F59E0B;
+  --pending-bg:  rgba(245,158,11,0.1);
+  --in-route:    #60A5FA;
+  --in-route-bg: rgba(96,165,250,0.1);
+  --delivered:     #34D399;
+  --delivered-bg:  rgba(52,211,153,0.1);
+  --danger:    #F87171;
+  --danger-bg: rgba(248,113,113,0.1);
+  --radius:    12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --font: 'Outfit', sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button { font-family: var(--font); cursor: pointer; border: none; outline: none; transition: all 0.18s ease; }
+button:active { transform: scale(0.97); }
+input, textarea, select { font-family: var(--font); outline: none; border: none; }
+a { text-decoration: none; color: inherit; }
+
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+@keyframes fadeUp   { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+@keyframes fadeIn   { from { opacity:0; } to { opacity:1; } }
+@keyframes slideIn  { from { opacity:0; transform:translateX(-10px); } to { opacity:1; transform:translateX(0); } }
+@keyframes scaleIn  { from { opacity:0; transform:scale(0.94); } to { opacity:1; transform:scale(1); } }
+@keyframes spin     { to { transform:rotate(360deg); } }
+@keyframes pulseDot { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+.fade-up  { animation: fadeUp  0.32s ease forwards; }
+.fade-in  { animation: fadeIn  0.24s ease forwards; }
+.slide-in { animation: slideIn 0.24s ease forwards; }
+.scale-in { animation: scaleIn 0.24s ease forwards; }
+
+/* Staggered children */
+.stagger > *:nth-child(1) { animation-delay: 0.00s; }
+.stagger > *:nth-child(2) { animation-delay: 0.06s; }
+.stagger > *:nth-child(3) { animation-delay: 0.12s; }
+.stagger > *:nth-child(4) { animation-delay: 0.18s; }
+.stagger > *:nth-child(5) { animation-delay: 0.24s; }
+
+/* Input focus glow */
+input:focus, textarea:focus {
+  border-color: var(--accent-border) !important;
+  box-shadow: 0 0 0 3px rgba(0,229,160,0.08);
+}
+
+/* Leaflet dark mode overrides */
+.leaflet-container { background: #0D1B35; }
+.leaflet-tile { filter: invert(0.9) hue-rotate(180deg) brightness(0.85) saturate(0.85); }
+.leaflet-control-attribution { display: none; }
+.leaflet-popup-content-wrapper {
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.leaflet-popup-tip { background: var(--bg-2); }
+
+/* Kanban responsive */
+@media (max-width: 900px) {
+  .kanban-grid { grid-template-columns: 1fr !important; }
+  .header-stats { display: none !important; }
+}
+@media (max-width: 600px) {
+  .admin-toolbar { flex-direction: column; }
+  .admin-toolbar .add-btn { width: 100%; justify-content: center; }
+}

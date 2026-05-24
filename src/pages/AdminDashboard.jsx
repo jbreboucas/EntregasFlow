@@ -1,0 +1,383 @@
+import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth, useOrders } from '../App'
+import { STATUS_CONFIG, timeAgo } from '../lib/mockData'
+import {
+  LogOut, Plus, Phone, MapPin, User, Package,
+  Clock, CheckCircle, Truck, Search, X, ChevronRight,
+} from 'lucide-react'
+
+export default function AdminDashboard() {
+  const { user, logout } = useAuth()
+  const { orders, updateOrder, addOrder } = useOrders()
+  const navigate = useNavigate()
+  const [search, setSearch] = useState('')
+  const [showModal, setShowModal] = useState(false)
+  const [newOrder, setNewOrder] = useState({ cliente_nome: '', cliente_telefone: '', endereco: '' })
+
+  const handleLogout = () => { logout(); navigate('/login') }
+
+  const filtered = useMemo(() =>
+    orders.filter(o =>
+      !search ||
+      o.cliente_nome.toLowerCase().includes(search.toLowerCase()) ||
+      o.id.toLowerCase().includes(search.toLowerCase()) ||
+      o.endereco.toLowerCase().includes(search.toLowerCase())
+    ), [orders, search])
+
+  const byStatus = (st) => filtered.filter(o => o.status === st)
+
+  const counts = {
+    pendente: orders.filter(o => o.status === 'pendente').length,
+    em_rota:  orders.filter(o => o.status === 'em_rota').length,
+    entregue: orders.filter(o => o.status === 'entregue').length,
+  }
+
+  const handleCreate = () => {
+    const id = `PED-${String(orders.length + 1).padStart(3, '0')}`
+    addOrder({
+      ...newOrder, id, status: 'pendente',
+      entregador_id: null, entregador_nome: null,
+      lat: -3.7317 + (Math.random() - 0.5) * 0.08,
+      lng: -38.5267 + (Math.random() - 0.5) * 0.08,
+      criado_em: new Date().toISOString(),
+    })
+    setNewOrder({ cliente_nome: '', cliente_telefone: '', endereco: '' })
+    setShowModal(false)
+  }
+
+  return (
+    <div style={s.page}>
+      {/* ── Header ── */}
+      <header style={s.header}>
+        <div style={s.hLeft}>
+          <div style={s.logoBox}><Package size={17} color="var(--accent)" /></div>
+          <div>
+            <div style={s.logoName}>EntregaFlow</div>
+            <div style={s.logoSub}>Painel do Administrador</div>
+          </div>
+        </div>
+        <div style={s.hRight}>
+          <div style={s.statsRow} className="header-stats">
+            {[
+              { key: 'pendente', label: 'Pendentes', icon: Clock,       color: 'var(--pending)' },
+              { key: 'em_rota',  label: 'Em rota',   icon: Truck,       color: 'var(--in-route)' },
+              { key: 'entregue', label: 'Entregues',  icon: CheckCircle, color: 'var(--delivered)' },
+            ].map(({ key, label, icon: Icon, color }) => (
+              <div key={key} style={s.stat}>
+                <Icon size={14} color={color} />
+                <span style={{ ...s.statN, color }}>{counts[key]}</span>
+                <span style={s.statL}>{label}</span>
+              </div>
+            ))}
+          </div>
+          <div style={s.userChip}>
+            <div style={s.avatar}>{user.avatar}</div>
+            <span style={s.userName}>{user.name}</span>
+          </div>
+          <button style={s.iconBtn} onClick={handleLogout} title="Sair">
+            <LogOut size={15} />
+          </button>
+        </div>
+      </header>
+
+      {/* ── Toolbar ── */}
+      <div style={s.toolbar} className="admin-toolbar">
+        <div style={s.searchWrap}>
+          <Search size={14} color="var(--text-3)"
+            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+          <input
+            style={s.searchInput}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por nome, ID ou endereço…"
+          />
+          {search && (
+            <button style={s.clearBtn} onClick={() => setSearch('')}><X size={13} /></button>
+          )}
+        </div>
+        <button style={s.addBtn} className="add-btn" onClick={() => setShowModal(true)}>
+          <Plus size={15} /> Novo pedido
+        </button>
+      </div>
+
+      {/* ── Kanban ── */}
+      <div style={s.kanban} className="kanban-grid">
+        {['pendente', 'em_rota', 'entregue'].map(col => {
+          const cfg = STATUS_CONFIG[col]
+          const cards = byStatus(col)
+          return (
+            <div key={col} style={s.column}>
+              <div style={s.colHead}>
+                <div style={{ ...s.colDot, background: cfg.color }} />
+                <span style={s.colTitle}>{cfg.label}</span>
+                <div style={{ ...s.colBadge, color: cfg.color, background: cfg.bg }}>
+                  {cards.length}
+                </div>
+              </div>
+              <div style={s.cardList}>
+                {cards.length === 0 ? (
+                  <div style={s.emptyCol}>
+                    <Package size={26} color="var(--text-3)" />
+                    <span style={s.emptyTxt}>Nenhum pedido</span>
+                  </div>
+                ) : (
+                  cards.map((order, i) => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      delay={i * 0.05}
+                      onMove={(id, st) => updateOrder(id, { status: st })}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── New Order Modal ── */}
+      {showModal && (
+        <div style={s.overlay} onClick={() => setShowModal(false)}>
+          <div style={s.modal} onClick={e => e.stopPropagation()} className="scale-in">
+            <div style={s.modalHead}>
+              <span style={s.modalTitle}>Novo pedido</span>
+              <button style={s.iconBtn} onClick={() => setShowModal(false)}><X size={16} /></button>
+            </div>
+            <div style={s.modalBody}>
+              {[
+                { key: 'cliente_nome',      label: 'Nome do cliente',     placeholder: 'Ana Beatriz Silva',          Icon: User },
+                { key: 'cliente_telefone',  label: 'Telefone',             placeholder: '(85) 98765-4321',            Icon: Phone },
+                { key: 'endereco',          label: 'Endereço de entrega',  placeholder: 'Rua das Flores, 142, Aldeota', Icon: MapPin },
+              ].map(({ key, label, placeholder, Icon }) => (
+                <div key={key} style={s.field}>
+                  <label style={s.fieldLabel}>{label}</label>
+                  <div style={{ position: 'relative' }}>
+                    <Icon size={14} color="var(--text-3)"
+                      style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                    <input
+                      style={s.fieldInput}
+                      value={newOrder[key]}
+                      placeholder={placeholder}
+                      onChange={e => setNewOrder(p => ({ ...p, [key]: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              ))}
+              <button
+                style={{ ...s.addBtn, width: '100%', justifyContent: 'center', marginTop: 4 }}
+                disabled={!newOrder.cliente_nome || !newOrder.cliente_telefone || !newOrder.endereco}
+                onClick={handleCreate}
+              >
+                <Plus size={15} /> Criar pedido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Order Card ───────────────────────────────────────────────────────────────
+function OrderCard({ order, delay, onMove }) {
+  const cfg = STATUS_CONFIG[order.status]
+
+  return (
+    <div style={{ ...s.card, animationDelay: `${delay}s` }} className="slide-in">
+      {/* Top row */}
+      <div style={s.cardTop}>
+        <span style={s.cardId}># {order.id}</span>
+        <span style={{ ...s.pill, color: cfg.color, background: cfg.bg }}>{cfg.label}</span>
+      </div>
+
+      <div style={s.cardName}>{order.cliente_nome}</div>
+
+      <div style={s.infoList}>
+        <Row icon={Phone}  text={order.cliente_telefone} />
+        <Row icon={MapPin} text={order.endereco} truncate />
+        {order.entregador_nome && <Row icon={User} text={order.entregador_nome} accent />}
+      </div>
+
+      <div style={s.cardFoot}>
+        <span style={s.cardTime}>{timeAgo(order.criado_em)}</span>
+        {cfg.next && (
+          <button
+            style={s.advBtn}
+            onClick={() => onMove(order.id, cfg.next)}
+          >
+            {cfg.nextLabel} <ChevronRight size={12} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Row({ icon: Icon, text, truncate, accent }) {
+  return (
+    <div style={s.infoRow}>
+      <Icon size={12} color={accent ? 'var(--accent)' : 'var(--text-3)'} style={{ flexShrink: 0 }} />
+      <span style={{
+        ...s.infoText,
+        color: accent ? 'var(--accent)' : 'var(--text-2)',
+        overflow: truncate ? 'hidden' : undefined,
+        textOverflow: truncate ? 'ellipsis' : undefined,
+        whiteSpace: truncate ? 'nowrap' : undefined,
+        flex: truncate ? 1 : undefined,
+      }}>
+        {text}
+      </span>
+    </div>
+  )
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const s = {
+  page: { height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', overflow: 'hidden' },
+
+  // Header
+  header: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '0 20px', height: 56, flexShrink: 0,
+    background: 'var(--bg-2)', borderBottom: '1px solid var(--border)',
+  },
+  hLeft: { display: 'flex', alignItems: 'center', gap: 11 },
+  logoBox: {
+    width: 34, height: 34, borderRadius: 9,
+    background: 'var(--accent-dim)', border: '1px solid var(--accent-border)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  logoName: { fontSize: 15, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.3px' },
+  logoSub: { fontSize: 10, color: 'var(--text-3)' },
+  hRight: { display: 'flex', alignItems: 'center', gap: 14 },
+  statsRow: { display: 'flex', gap: 18 },
+  stat: { display: 'flex', alignItems: 'center', gap: 5 },
+  statN: { fontSize: 15, fontWeight: 800 },
+  statL: { fontSize: 12, color: 'var(--text-3)' },
+  userChip: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '5px 10px', background: 'var(--bg-3)',
+    border: '1px solid var(--border)', borderRadius: 8,
+  },
+  avatar: {
+    width: 24, height: 24, borderRadius: 6,
+    background: 'var(--accent-dim)', border: '1px solid var(--accent-border)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 10, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--mono)',
+  },
+  userName: { fontSize: 13, fontWeight: 500, color: 'var(--text-1)' },
+  iconBtn: {
+    padding: 7, background: 'transparent', color: 'var(--text-3)',
+    border: '1px solid var(--border)', borderRadius: 7,
+    display: 'flex', alignItems: 'center',
+  },
+
+  // Toolbar
+  toolbar: {
+    display: 'flex', gap: 10, padding: '10px 20px', flexShrink: 0,
+    background: 'var(--bg-2)', borderBottom: '1px solid var(--border)',
+  },
+  searchWrap: { flex: 1, position: 'relative' },
+  searchInput: {
+    width: '100%', padding: '8px 32px 8px 34px',
+    background: 'var(--bg-3)', border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)', color: 'var(--text-1)', fontSize: 13,
+    transition: 'border-color 0.2s',
+  },
+  clearBtn: {
+    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+    background: 'transparent', color: 'var(--text-3)', padding: 2, borderRadius: 4, display: 'flex',
+  },
+  addBtn: {
+    padding: '8px 16px', background: 'var(--accent)', color: '#080D1A',
+    borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,
+    display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', flexShrink: 0,
+  },
+
+  // Kanban
+  kanban: {
+    display: 'grid', gridTemplateColumns: 'repeat(3,1fr)',
+    gap: 12, padding: '12px 20px', flex: 1, overflow: 'hidden',
+    alignItems: 'start',
+  },
+  column: {
+    display: 'flex', flexDirection: 'column',
+    background: 'var(--bg-2)', border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)', overflow: 'hidden',
+    maxHeight: 'calc(100vh - 130px)',
+  },
+  colHead: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '11px 14px', borderBottom: '1px solid var(--border)',
+    flexShrink: 0,
+  },
+  colDot: { width: 8, height: 8, borderRadius: '50%' },
+  colTitle: { fontSize: 13, fontWeight: 600, color: 'var(--text-1)', flex: 1 },
+  colBadge: {
+    width: 22, height: 22, borderRadius: 6,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 11, fontWeight: 700,
+  },
+  cardList: { padding: 8, display: 'flex', flexDirection: 'column', gap: 7, overflowY: 'auto', flex: 1 },
+  emptyCol: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', padding: '36px 20px', gap: 10, opacity: 0.5,
+  },
+  emptyTxt: { fontSize: 13, color: 'var(--text-3)' },
+
+  // Card
+  card: {
+    background: 'var(--bg-3)', border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)', padding: '11px 13px',
+    display: 'flex', flexDirection: 'column', gap: 6,
+    opacity: 0, transition: 'border-color 0.2s',
+    cursor: 'default',
+  },
+  cardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  cardId: { fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', letterSpacing: '0.5px' },
+  pill: { display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 700 },
+  cardName: { fontSize: 14, fontWeight: 600, color: 'var(--text-1)' },
+  infoList: { display: 'flex', flexDirection: 'column', gap: 5 },
+  infoRow: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
+  infoText: { fontSize: 12, color: 'var(--text-2)' },
+  cardFoot: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 9, marginTop: 3, borderTop: '1px solid var(--border)',
+  },
+  cardTime: { fontSize: 10, color: 'var(--text-3)' },
+  advBtn: {
+    display: 'flex', alignItems: 'center', gap: 4,
+    padding: '4px 9px', background: 'transparent',
+    border: '1px solid var(--accent-border)', borderRadius: 6,
+    color: 'var(--accent)', fontSize: 11, fontWeight: 600,
+  },
+
+  // Modal
+  overlay: {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)',
+    backdropFilter: 'blur(6px)', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', zIndex: 300,
+  },
+  modal: {
+    width: '100%', maxWidth: 440, margin: '0 16px',
+    background: 'var(--bg-2)', border: '1px solid var(--border-2)',
+    borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+    boxShadow: 'var(--shadow)',
+  },
+  modalHead: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '18px 22px', borderBottom: '1px solid var(--border)',
+  },
+  modalTitle: { fontSize: 15, fontWeight: 700, color: 'var(--text-1)' },
+  modalBody: { padding: '22px', display: 'flex', flexDirection: 'column', gap: 14 },
+  field: { display: 'flex', flexDirection: 'column', gap: 7 },
+  fieldLabel: { fontSize: 12, fontWeight: 500, color: 'var(--text-2)' },
+  fieldInput: {
+    width: '100%', padding: '10px 12px 10px 36px',
+    background: 'var(--bg)', border: '1px solid var(--border-2)',
+    borderRadius: 'var(--radius-sm)', color: 'var(--text-1)',
+    fontSize: 13, transition: 'border-color 0.2s, box-shadow 0.2s',
+  },
+}
