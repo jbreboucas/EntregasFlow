@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect, createContext, useContext } from 'react'
-import { supabase, getProfile } from './lib/supabase'
+import { supabase } from './lib/supabase'
 import Login from './pages/Login'
 import AdminDashboard from './pages/AdminDashboard'
 import CourierDashboard from './pages/CourierDashboard'
@@ -12,64 +12,47 @@ export const OrderContext = createContext(null)
 export const useAuth   = () => useContext(AuthContext)
 export const useOrders = () => useContext(OrderContext)
 
-// Monta usuário a partir da sessão + profile (com fallback)
-const buildUser = async (sessionUser) => {
-  try {
-    const profile = await getProfile(sessionUser.id)
-    return { ...sessionUser, ...profile }
-  } catch {
-    // Fallback: usa metadados do token JWT
-    const meta = sessionUser.user_metadata || {}
-    return {
-      ...sessionUser,
-      name:   meta.name  || sessionUser.email?.split('@')[0] || 'Usuário',
-      role:   meta.role  || 'entregador',
-      avatar: meta.name  ? meta.name.slice(0,2).toUpperCase() : 'US',
-    }
+// Extrai dados do usuário DIRETO do JWT — sem chamada ao banco
+const userFromSession = (session) => {
+  if (!session?.user) return null
+  const meta = session.user.user_metadata || {}
+  return {
+    ...session.user,
+    name:   meta.name  || session.user.email?.split('@')[0] || 'Usuário',
+    role:   meta.role  || 'entregador',
+    avatar: meta.name  ? meta.name.slice(0,2).toUpperCase() : 'US',
   }
 }
 
 export default function App() {
-  const [user,    setUser]    = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [user,    setUser]    = useState(undefined) // undefined = ainda não sabe
   const [orders,  setOrders]  = useState([])
 
   useEffect(() => {
-    let settled = false
-    const finish = (u) => { if (!settled) { settled = true; setUser(u); setLoading(false) } }
+    // 1. Checa sessão existente de forma síncrona
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(userFromSession(session))
+    }).catch(() => setUser(null))
 
-    // Timeout máximo de 5s
-    const timeout = setTimeout(() => finish(null), 5000)
-
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const u = await buildUser(session.user)
-        finish(u)
-      } else {
-        finish(null)
-      }
-    }).catch(() => finish(null))
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      clearTimeout(timeout)
-      if (session?.user) {
-        const u = await buildUser(session.user)
-        setUser(u)
-        setLoading(false)
-      } else {
-        setUser(null)
-        setLoading(false)
-      }
+    // 2. Escuta mudanças de auth (login/logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(userFromSession(session))
     })
 
-    return () => { subscription.unsubscribe(); clearTimeout(timeout) }
+    return () => subscription.unsubscribe()
   }, [])
 
-  const logout = async () => { await supabase.auth.signOut(); setUser(null) }
-  const updateOrder = (id, changes) => setOrders(prev => prev.map(o => o.id === id ? { ...o, ...changes } : o))
-  const addOrder    = (order) => setOrders(prev => [order, ...prev])
+  const logout = async () => {
+    await supabase.auth.signOut()
+    setUser(null)
+  }
 
-  if (loading) return (
+  const updateOrder = (id, changes) =>
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, ...changes } : o))
+  const addOrder = (order) => setOrders(prev => [order, ...prev])
+
+  // undefined = ainda resolvendo sessão → tela de loading
+  if (user === undefined) return (
     <div style={{ height:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'var(--bg)', gap:16 }}>
       <div style={{ width:36, height:36, borderRadius:9, background:'var(--accent-dim)', border:'1px solid var(--accent-border)', display:'flex', alignItems:'center', justifyContent:'center', animation:'spin 1s linear infinite' }}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round">
@@ -85,13 +68,19 @@ export default function App() {
       <OrderContext.Provider value={{ orders, setOrders, updateOrder, addOrder }}>
         <Routes>
           <Route path="/login" element={
-            !user ? <Login /> : <Navigate to={user.role === 'admin' ? '/admin' : '/courier'} replace />
+            !user
+              ? <Login />
+              : <Navigate to={user.role === 'admin' ? '/admin' : '/courier'} replace />
           } />
           <Route path="/admin" element={
-            user?.role === 'admin' ? <AdminDashboard /> : <Navigate to="/login" replace />
+            user?.role === 'admin'
+              ? <AdminDashboard />
+              : <Navigate to="/login" replace />
           } />
           <Route path="/courier" element={
-            user?.role === 'entregador' ? <CourierDashboard /> : <Navigate to="/login" replace />
+            user?.role === 'entregador'
+              ? <CourierDashboard />
+              : <Navigate to="/login" replace />
           } />
           <Route path="/map/:orderId" element={
             user ? <MapView /> : <Navigate to="/login" replace />
