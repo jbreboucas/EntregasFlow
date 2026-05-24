@@ -1,10 +1,8 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { signIn } from '../lib/supabase'
 import { Mail, Lock, ArrowRight, Package, Truck, ShieldCheck } from 'lucide-react'
 
 export default function Login() {
-  const navigate = useNavigate()
   const [role,     setRole]     = useState('admin')
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
@@ -13,15 +11,20 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault()
-    setLoading(true); setError('')
-    const { data, error: authError } = await signIn(email, password)
+    setLoading(true)
+    setError('')
+
+    const { error: authError } = await signIn(email, password)
+
     if (authError) {
       setError('Email ou senha incorretos. Verifique suas credenciais.')
-      setLoading(false); return
+      setLoading(false)
+      return
     }
-    // role redirect handled by App.jsx onAuthStateChange
-    navigate('/', { replace: true })
-    setLoading(false)
+    // ✅ NÃO chama navigate() aqui.
+    // O onAuthStateChange em App.jsx vai detectar o login,
+    // atualizar o user e o React Router redireciona automaticamente.
+    // O botão fica em "Entrando…" até o redirect acontecer.
   }
 
   return (
@@ -44,7 +47,8 @@ export default function Login() {
           ].map(({ id, label, Icon }) => (
             <button key={id}
               style={{ ...s.roleBtn, ...(role === id ? s.roleBtnActive : {}) }}
-              onClick={() => { setRole(id); setEmail(''); setPassword(''); setError('') }}>
+              onClick={() => { setRole(id); setEmail(''); setPassword(''); setError('') }}
+              type="button">
               <Icon size={15} />{label}
             </button>
           ))}
@@ -52,9 +56,11 @@ export default function Login() {
 
         <form onSubmit={handleLogin} style={s.form}>
           <Field icon={Mail} label="Email" type="email" value={email}
-            placeholder="seu@email.com" onChange={e => setEmail(e.target.value)} />
+            placeholder={role === 'admin' ? 'admin@entregaflow.com' : 'joao@entregaflow.com'}
+            onChange={e => setEmail(e.target.value)} />
           <Field icon={Lock} label="Senha" type="password" value={password}
-            placeholder="••••••••" onChange={e => setPassword(e.target.value)} />
+            placeholder="••••••••"
+            onChange={e => setPassword(e.target.value)} />
 
           {error && <div style={s.errorBox}>{error}</div>}
 
@@ -64,6 +70,11 @@ export default function Login() {
               : <><span>Entrar</span><ArrowRight size={16} /></>}
           </button>
         </form>
+
+        <div style={s.hint}>
+          <div style={s.hintRow}><span style={s.hintLabel}>Admin</span><span style={s.hintVal}>admin@entregaflow.com · Admin@2025</span></div>
+          <div style={s.hintRow}><span style={s.hintLabel}>Entregador</span><span style={s.hintVal}>joao@entregaflow.com · Joao@2025</span></div>
+        </div>
       </div>
     </div>
   )
@@ -100,5 +111,9 @@ const s = {
   inputWrap: { position:'relative' },
   input: { width:'100%', padding:'11px 14px 11px 38px', background:'var(--bg)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-sm)', color:'var(--text-1)', fontSize:14, transition:'border-color 0.2s, box-shadow 0.2s' },
   errorBox: { padding:'10px 14px', borderRadius:'var(--radius-sm)', background:'var(--danger-bg)', border:'1px solid rgba(248,113,113,0.2)', color:'var(--danger)', fontSize:13, lineHeight:1.5 },
-  submitBtn: { marginTop:4, padding:'13px 20px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:14, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:8 },
+  submitBtn: { marginTop:4, padding:'13px 20px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:14, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:8, letterSpacing:'0.2px' },
+  hint: { marginTop:22, paddingTop:16, borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:6 },
+  hintRow: { display:'flex', alignItems:'center', gap:8 },
+  hintLabel: { fontSize:10, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.5px', minWidth:70 },
+  hintVal: { fontSize:11, color:'var(--text-3)', fontFamily:'var(--mono)' },
 }
