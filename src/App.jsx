@@ -17,17 +17,33 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [orders,  setOrders]  = useState([])
 
-  // Rehydrate session on mount
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        try {
-          const profile = await getProfile(session.user.id)
-          setUser({ ...session.user, ...profile })
-        } catch { setUser(null) }
+    let done = false
+
+    // Timeout de segurança: se demorar mais de 4s, libera a tela de login
+    const timeout = setTimeout(() => {
+      if (!done) { done = true; setLoading(false) }
+    }, 4000)
+
+    const init = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) {
+          try {
+            const profile = await getProfile(session.user.id)
+            setUser({ ...session.user, ...profile })
+          } catch {
+            setUser(null)
+          }
+        }
+      } catch (err) {
+        console.error('Supabase init error:', err)
+      } finally {
+        if (!done) { done = true; clearTimeout(timeout); setLoading(false) }
       }
-      setLoading(false)
-    })
+    }
+
+    init()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
@@ -39,19 +55,33 @@ export default function App() {
         setUser(null)
       }
     })
-    return () => subscription.unsubscribe()
+
+    return () => { subscription.unsubscribe(); clearTimeout(timeout) }
   }, [])
 
   const logout = async () => { await supabase.auth.signOut(); setUser(null) }
 
   const updateOrder = (id, changes) =>
     setOrders(prev => prev.map(o => o.id === id ? { ...o, ...changes } : o))
-
   const addOrder = (order) => setOrders(prev => [order, ...prev])
 
   if (loading) return (
-    <div style={{ height:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)', color:'var(--text-3)', fontSize:13 }}>
-      Carregando…
+    <div style={{
+      height: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg)', gap: 16,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 9,
+        background: 'var(--accent-dim)', border: '1px solid var(--accent-border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'spin 1s linear infinite',
+      }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round">
+          <path d="M21 10c-2-5-8-8-13-6"/><path d="M3 14c2 5 8 8 13 6"/>
+        </svg>
+      </div>
+      <span style={{ fontSize: 13, color: 'var(--text-3)' }}>Carregando…</span>
     </div>
   )
 
@@ -60,9 +90,7 @@ export default function App() {
       <OrderContext.Provider value={{ orders, setOrders, updateOrder, addOrder }}>
         <Routes>
           <Route path="/login" element={
-            !user
-              ? <Login />
-              : <Navigate to={user.role === 'admin' ? '/admin' : '/courier'} replace />
+            !user ? <Login /> : <Navigate to={user.role === 'admin' ? '/admin' : '/courier'} replace />
           } />
           <Route path="/admin" element={
             user?.role === 'admin' ? <AdminDashboard /> : <Navigate to="/login" replace />
