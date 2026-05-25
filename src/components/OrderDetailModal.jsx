@@ -234,8 +234,8 @@ function InfoRow({ icon:Icon, label, children }) {
 
 const s = {
   overlay:{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:400, padding:16 },
-  modal:{ width:'100%', maxWidth:500, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-lg)', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'var(--shadow)' },
-  head:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 18px', borderBottom:'1px solid var(--border)', flexShrink:0 },
+  modal:{ width:'100%', maxWidth:500, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-lg)', maxHeight:'90vh', overflowY:'auto', boxShadow:'var(--shadow)' },
+  head:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 18px', borderBottom:'1px solid var(--border)', position:'sticky', top:0, background:'var(--bg-2)', zIndex:10, borderRadius:'var(--radius-lg) var(--radius-lg) 0 0' },
   headLeft:{ display:'flex', alignItems:'center', gap:10 },
   statusDot:{ width:9, height:9, borderRadius:'50%', flexShrink:0 },
   orderId:{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700, color:'var(--text-1)' },
@@ -243,7 +243,7 @@ const s = {
   editBtn:{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', background:'var(--bg-3)', border:'1px solid var(--border-2)', borderRadius:7, color:'var(--text-2)', fontSize:12, fontWeight:600, cursor:'pointer' },
   saveBtn:{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', background:'var(--accent)', border:'none', borderRadius:7, color:'#080D1A', fontSize:12, fontWeight:700, cursor:'pointer' },
   closeBtn:{ padding:7, background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-2)', display:'flex', alignItems:'center', cursor:'pointer' },
-  body:{ overflowY:'auto', overflowX:'hidden', padding:'18px 18px 28px', display:'flex', flexDirection:'column', gap:18, flex:'1 1 0', minHeight:0 },
+  body:{ padding:'18px 18px 28px', display:'flex', flexDirection:'column', gap:18 },
   clientName:{ fontSize:20, fontWeight:900, color:'var(--text-1)', letterSpacing:'-0.4px' },
   lbl:{ fontSize:11, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.4px', display:'block', marginBottom:6 },
   editGrid:{ display:'flex', flexDirection:'column', gap:12 },
