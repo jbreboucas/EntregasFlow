@@ -38,9 +38,9 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  const logout = async () => { await supabase.auth.signOut(); setUser(null) }
-  const updateOrder = (id, changes) => setOrders(prev => prev.map(o => o.id === id ? { ...o, ...changes } : o))
-  const addOrder    = (order) => setOrders(prev => [order, ...prev])
+  const logout      = async () => { await supabase.auth.signOut(); setUser(null) }
+  const updateOrder = (id, ch) => setOrders(prev => prev.map(o => o.id === id ? { ...o, ...ch } : o))
+  const addOrder    = (order)  => setOrders(prev => [order, ...prev])
 
   if (user === undefined) return (
     <div style={{ height:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'var(--bg)', gap:16 }}>
@@ -57,14 +57,12 @@ export default function App() {
     <AuthContext.Provider value={{ user, logout }}>
       <OrderContext.Provider value={{ orders, setOrders, updateOrder, addOrder }}>
         <Routes>
-          <Route path="/login" element={!user ? <Login /> : <Navigate to={user.role === 'admin' ? '/admin' : '/courier'} replace />} />
-          <Route path="/admin"   element={user?.role === 'admin'      ? <AdminDashboard />   : <Navigate to="/login" replace />} />
-          <Route path="/courier" element={user?.role === 'entregador' ? <CourierDashboard /> : <Navigate to="/login" replace />} />
-          {/* Rota única */}
-          <Route path="/map/single/:ids" element={user ? <MapView /> : <Navigate to="/login" replace />} />
-          {/* Rota multi-parada otimizada */}
-          <Route path="/map/multi/:ids"  element={user ? <MapView /> : <Navigate to="/login" replace />} />
-          <Route path="/confirm/:orderId" element={user ? <DeliveryConfirm /> : <Navigate to="/login" replace />} />
+          <Route path="/login"    element={!user ? <Login /> : <Navigate to={user.role === 'admin' ? '/admin' : '/courier'} replace />} />
+          <Route path="/admin"    element={user?.role === 'admin'      ? <AdminDashboard />   : <Navigate to="/login" replace />} />
+          <Route path="/courier"  element={user?.role === 'entregador' ? <CourierDashboard /> : <Navigate to="/login" replace />} />
+          {/* ✅ mode e ids como parâmetros dinâmicos */}
+          <Route path="/map/:mode/:ids"    element={user ? <MapView /> : <Navigate to="/login" replace />} />
+          <Route path="/confirm/:orderId"  element={user ? <DeliveryConfirm /> : <Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to={user ? (user.role === 'admin' ? '/admin' : '/courier') : '/login'} replace />} />
         </Routes>
       </OrderContext.Provider>
