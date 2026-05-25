@@ -40,38 +40,51 @@ const distToPolyline = (lat, lng, pts) => {
   return min
 }
 
-// Rota simples ponto a ponto
-const fetchRoute = async (from, to) => {
+// Rota otimizada via OSRM trip
+// waypoints[0] = origem GPS, waypoints[1..n] = destinos
+// Retorna a ordem ótima dos DESTINOS (0-based no array de destinos)
+const fetchOptimizedTrip = async (waypoints) => {
+  const coords = waypoints.map(p => `${p.lng},${p.lat}`).join(';')
+  // roundtrip=false + source=first: começa no GPS, termina onde otimizar
+  const url = `https://router.project-osrm.org/trip/v1/driving/${coords}?roundtrip=false&source=first&overview=false`
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(12000) })
+    const d = await r.json()
+    if (d.code !== 'Ok' || !d.waypoints?.length) return null
+
+    // d.waypoints[i].waypoint_index = posição do waypoint i no percurso otimizado
+    // Pegamos só os destinos (skip índice 0 = GPS) com sua posição original no input
+    const dests = d.waypoints.slice(1).map((w, origIdx) => ({
+      origIdx,              // índice no array de destinos (0..n-1)
+      tripPos: w.waypoint_index,  // posição no percurso ótimo
+    }))
+
+    // Ordena pela posição no percurso → dá a sequência de visita correta
+    dests.sort((a, b) => a.tripPos - b.tripPos)
+
+    return {
+      order:    dests.map(d => d.origIdx),  // ex: [2,0,1] = visitar dest[2] primeiro, depois dest[0], depois dest[1]
+      distance: d.trips?.[0]?.distance || 0,
+      duration: d.trips?.[0]?.duration || 0,
+    }
+  } catch (e) {
+    console.warn('OSRM trip error:', e)
+    return null
+  }
+}
+
+// Rota de um segmento da cadeia
+const fetchSegment = async (from, to) => {
   const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(8000) })
     const d = await r.json()
     const route = d.routes?.[0]
     if (!route) return null
-    return { points: route.geometry.coordinates.map(([lng,lat]) => [lat,lng]), distance: route.distance, duration: route.duration }
-  } catch { return null }
-}
-
-// Rota otimizada multi-parada via OSRM trip (considera distâncias e mãos de direção)
-const fetchOptimizedTrip = async (waypoints) => {
-  // waypoints: [{lat, lng}, ...]  — primeiro é a origem (GPS)
-  const coords = waypoints.map(p => `${p.lng},${p.lat}`).join(';')
-  const url = `https://router.project-osrm.org/trip/v1/driving/${coords}?roundtrip=false&source=first&destination=last&overview=full&geometries=geojson&steps=false`
-  try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(12000) })
-    const d = await r.json()
-    if (d.code !== 'Ok' || !d.trips?.[0]) return null
-    // OSRM retorna a ordem ótima em d.waypoints[].waypoint_index (destinos reordenados)
-    // O índice 0 é sempre a origem (source=first), ignoramos
-    const optimizedOrder = d.waypoints
-      .slice(1)  // remove a origem
-      .sort((a, b) => a.trips_index !== undefined ? a.waypoint_index - b.waypoint_index : 0)
-      .map(w => w.waypoint_index - 1)  // -1 porque removemos a origem
-
     return {
-      order:    optimizedOrder,
-      distance: d.trips[0].distance,
-      duration: d.trips[0].duration,
+      points:   route.geometry.coordinates.map(([lng,lat]) => [lat,lng]),
+      distance: route.distance,
+      duration: route.duration,
     }
   } catch { return null }
 }
@@ -248,36 +261,48 @@ export default function MapView() {
     ]
     mapInst.current.fitBounds(L.latLngBounds(allPts), { padding: [60, 60] })
 
-    // ── Calcula rota de cada parada em paralelo (todas visíveis) ──────────
+    // ── Calcula rotas em CADEIA: GPS→1, 1→2, 2→3 (não todas do GPS) ─────────
     setLoadingIdx(currentPedidos.map((_, i) => i))
-    const allRoutePoints = []  // acumula pontos para linha mestra
 
-    const results = await Promise.all(
-      ordered.map(ped =>
-        fetchRoute(from, { lat: ped.lat || -3.7317, lng: ped.lng || -38.5267 })
-      )
+    // Monta a sequência de waypoints: GPS, parada1, parada2, ...
+    const chain = [from, ...ordered.map(ped => ({
+      lat: ped.lat || -3.7317,
+      lng: ped.lng || -38.5267,
+    }))]
+
+    // Calcula cada segmento em paralelo
+    const segResults = await Promise.all(
+      chain.slice(0, -1).map((wp, i) => fetchSegment(wp, chain[i + 1]))
     )
 
-    results.forEach((res, seqIdx) => {
+    segResults.forEach((res, seqIdx) => {
       if (!res || !mapInst.current) return
-      const ped  = ordered[seqIdx]
-      const ri   = currentPedidos.indexOf(ped)
-      const col  = COLORS[seqIdx % COLORS.length]
+      const ped   = ordered[seqIdx]
+      const ri    = currentPedidos.indexOf(ped)
+      const col   = COLORS[seqIdx % COLORS.length]
       const isAct = seqIdx === currentActiveIdx
 
-      // Linha individual por parada — todas visíveis simultaneamente
+      // Segmento colorido com a cor da parada de destino
       const line = L.polyline(res.points, {
-        color:     col,
-        weight:    isAct ? 6 : 4,
-        opacity:   isAct ? 1 : 0.6,
-        dashArray: isAct ? null : null,  // todas sólidas
+        color:   col,
+        weight:  isAct ? 7 : 5,
+        opacity: isAct ? 1 : 0.65,
       }).addTo(mapInst.current)
-      routeLines.current[ri]     = line
-      routePolylines.current[ri] = res.points
-      allRoutePoints.push(...res.points)
+
+      // Borda branca sutil para separar rotas que se sobrepõem
+      L.polyline(res.points, {
+        color:   '#fff',
+        weight:  isAct ? 11 : 9,
+        opacity: 0.18,
+      }).addTo(mapInst.current).bringToBack()
+
+      routeLines.current[ri]      = line
+      routePolylines.current[ri]  = res.points
 
       setRouteData(prev => {
-        const next = [...prev]; next[ri] = { distance: res.distance, duration: res.duration }; return next
+        const next = [...prev]
+        next[ri] = { distance: res.distance, duration: res.duration }
+        return next
       })
     })
 
