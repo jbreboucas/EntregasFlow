@@ -1,5 +1,5 @@
 import DatePicker from './DatePicker'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { X, Phone, MapPin, User, Clock, Camera, Edit2, Check, AlertCircle } from 'lucide-react'
 import { updatePedido } from '../lib/supabase'
 import { useOrders } from '../App'
@@ -30,6 +30,7 @@ export default function OrderDetailModal({ order, onClose, allowCarEdit }) {
   const { updateOrder } = useOrders()
   const canEdit = order.status !== 'entregue'
 
+  const bodyRef = useRef(null)
   const [editing,  setEditing]  = useState(false)
   const [saving,   setSaving]   = useState(false)
   const [imgOpen,  setImgOpen]  = useState(false)
@@ -40,6 +41,9 @@ export default function OrderDetailModal({ order, onClose, allowCarEdit }) {
     localizacao_carro: order.localizacao_carro || '',
     data_pedido:       order.data_pedido       || '',
   })
+
+  // Scroll to top sempre que o modal abre
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0 }, [])
 
   if (!order) return null
   const cfg = STATUS_CONFIG[order.status]
@@ -96,7 +100,7 @@ export default function OrderDetailModal({ order, onClose, allowCarEdit }) {
             </div>
           </div>
 
-          <div style={s.body}>
+          <div ref={bodyRef} style={s.body}>
             {/* Nome */}
             {editing ? (
               <div>
@@ -183,7 +187,7 @@ export default function OrderDetailModal({ order, onClose, allowCarEdit }) {
                   <div>
                     <div style={{ fontSize:12, color:'var(--text-3)', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}><Camera size={12} /> Foto da entrega</div>
                     <img src={order.foto_entrega_url} alt="Foto" onClick={() => setImgOpen(true)}
-                      style={{ width:'100%', borderRadius:10, border:'1px solid var(--border)', objectFit:'cover', maxHeight:200, cursor:'zoom-in' }} />
+                      style={{ width:'100%', borderRadius:10, border:'1px solid var(--border)', objectFit:'contain', maxHeight:300, cursor:'zoom-in', background:'var(--bg)' }} />
                     <div style={{ fontSize:11, color:'var(--text-3)', marginTop:4, textAlign:'center' }}>Toque para ampliar</div>
                   </div>
                 ) : (
@@ -239,7 +243,7 @@ const s = {
   editBtn:{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', background:'var(--bg-3)', border:'1px solid var(--border-2)', borderRadius:7, color:'var(--text-2)', fontSize:12, fontWeight:600, cursor:'pointer' },
   saveBtn:{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', background:'var(--accent)', border:'none', borderRadius:7, color:'#080D1A', fontSize:12, fontWeight:700, cursor:'pointer' },
   closeBtn:{ padding:7, background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-2)', display:'flex', alignItems:'center', cursor:'pointer' },
-  body:{ overflowY:'auto', overflowX:'hidden', padding:'18px 18px 28px', display:'flex', flexDirection:'column', gap:18, flex:1 },
+  body:{ overflowY:'auto', overflowX:'hidden', padding:'18px 18px 28px', display:'flex', flexDirection:'column', gap:18, flex:'1 1 0', minHeight:0 },
   clientName:{ fontSize:20, fontWeight:900, color:'var(--text-1)', letterSpacing:'-0.4px' },
   lbl:{ fontSize:11, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.4px', display:'block', marginBottom:6 },
   editGrid:{ display:'flex', flexDirection:'column', gap:12 },
