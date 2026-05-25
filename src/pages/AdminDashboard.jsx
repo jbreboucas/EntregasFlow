@@ -7,7 +7,7 @@ import AddressAutocomplete from '../components/AddressAutocomplete'
 import OrderDetailModal from '../components/OrderDetailModal'
 import {
   LogOut, Plus, Phone, MapPin, User, Package,
-  Clock, CheckCircle, Truck, Search, X, ChevronRight, Hash,
+  Clock, CheckCircle, Truck, Search, X, ChevronRight, Hash, RefreshCw,
 } from 'lucide-react'
 
 const CAR_POSITIONS = [
@@ -29,6 +29,7 @@ export default function AdminDashboard() {
   const [showModal,   setShowModal]   = useState(false)
   const [selectedId,  setSelectedId]  = useState(null)
   const [saving,      setSaving]      = useState(false)
+  const [refreshing,  setRefreshing]  = useState(false)
   const [form, setForm] = useState({ id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'', localizacao_carro:'', lat:null, lng:null })
 
   useEffect(() => {
@@ -42,6 +43,13 @@ export default function AdminDashboard() {
   }, [])
 
   const handleLogout = async () => { await logout(); navigate('/login') }
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    const { data } = await getPedidos()
+    if (data) setOrders(data)
+    setRefreshing(false)
+  }
 
   const filtered = useMemo(() =>
     orders.filter(o => !search ||
@@ -125,9 +133,14 @@ export default function AdminDashboard() {
           <input style={s.searchInput} value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome, ID ou endereço…" />
           {search && <button style={s.clearBtn} onClick={() => setSearch('')}><X size={13} /></button>}
         </div>
-        <button style={s.addBtn} className="add-btn" onClick={() => setShowModal(true)}>
-          <Plus size={15} /> Novo pedido
-        </button>
+        <div style={{ display:'flex', gap:8 }}>
+          <button style={s.refreshBtn} onClick={handleRefresh} title="Atualizar" disabled={refreshing}>
+            <RefreshCw size={14} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
+          </button>
+          <button style={s.addBtn} className="add-btn" onClick={() => setShowModal(true)}>
+            <Plus size={15} /> Novo pedido
+          </button>
+        </div>
       </div>
 
       {/* Kanban */}
@@ -306,6 +319,7 @@ const s = {
   searchInput:{ width:'100%', padding:'8px 32px 8px 34px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-1)', fontSize:13 },
   clearBtn:{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', background:'transparent', color:'var(--text-3)', padding:2, borderRadius:4, display:'flex' },
   addBtn:{ padding:'8px 16px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap', flexShrink:0 },
+  refreshBtn:{ display:'flex', alignItems:'center', justifyContent:'center', padding:'8px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-2)', cursor:'pointer', flexShrink:0 },
   kanban:{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, padding:'12px 20px', flex:1, overflow:'hidden', alignItems:'start' },
   column:{ display:'flex', flexDirection:'column', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', maxHeight:'calc(100vh - 130px)' },
   colHead:{ display:'flex', alignItems:'center', gap:8, padding:'11px 14px', borderBottom:'1px solid var(--border)', flexShrink:0 },

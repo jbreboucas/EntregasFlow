@@ -7,7 +7,7 @@ import { STATUS_CONFIG, timeAgo } from '../lib/mockData'
 import { getPedidos, updatePedido, subscribePedidos, createPedido } from '../lib/supabase'
 import {
   LogOut, Package, MapPin, Phone, Truck, CheckCircle,
-  Clock, Navigation, Link2, ChevronRight, Plus, X, User, Route, Hash
+  Clock, Navigation, Link2, ChevronRight, Plus, X, User, Route, Hash, RefreshCw
 } from 'lucide-react'
 
 // Opções de localização no carro
@@ -35,6 +35,7 @@ export default function CourierDashboard() {
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving]     = useState(false)
   const [selectedId, setSelectedId] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [form, setForm]         = useState({
     id_externo: '', cliente_nome: '', cliente_telefone: '', endereco: '',
     localizacao_carro: '', lat: null, lng: null
@@ -50,6 +51,13 @@ export default function CourierDashboard() {
   }, [])
 
   const handleLogout = async () => { await logout(); navigate('/login') }
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    const { data } = await getPedidos()
+    if (data) setOrders(data)
+    setRefreshing(false)
+  }
 
   const available = orders.filter(o => o.status === 'pendente' && !o.entregador_id)
   const myOrders  = orders.filter(o => o.entregador_id === user.id)
@@ -151,9 +159,14 @@ export default function CourierDashboard() {
           <Tab active={tab==='available'} onClick={() => setTab('available')} label="Disponíveis"  count={available.length} countColor="var(--pending)" />
           <Tab active={tab==='mine'}      onClick={() => setTab('mine')}      label="Meus pedidos" count={myOrders.length}   countColor="var(--in-route)" />
         </div>
-        <button style={s.addBtn} onClick={() => setShowModal(true)}>
-          <Plus size={14} /> Novo pedido
-        </button>
+        <div style={{ display:'flex', gap:8 }}>
+          <button style={s.refreshBtn} onClick={handleRefresh} title="Atualizar pedidos" disabled={refreshing}>
+            <RefreshCw size={14} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
+          </button>
+          <button style={s.addBtn} onClick={() => setShowModal(true)}>
+            <Plus size={14} /> Novo pedido
+          </button>
+        </div>
       </div>
 
       {/* Lista */}
@@ -287,7 +300,7 @@ function Stat({ icon:Icon, color, value, label }) {
 
 function Tab({ active, onClick, label, count, countColor }) {
   return (
-    <button style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 14px', borderRadius:8, fontSize:13, fontWeight:500, color: active ? 'var(--text-1)' : 'var(--text-3)', background: active ? 'var(--bg-3)' : 'transparent', boxShadow: active ? 'inset 0 0 0 1px var(--border-2)' : 'none' }} onClick={onClick} onClickCapture={e => { if (e.target.closest("button")) e.stopPropagation() }}>
+    <button style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 14px', borderRadius:8, fontSize:13, fontWeight:500, color: active ? 'var(--text-1)' : 'var(--text-3)', background: active ? 'var(--bg-3)' : 'transparent', boxShadow: active ? 'inset 0 0 0 1px var(--border-2)' : 'none' }} onClick={onClick}>
       {label}
       {count > 0 && <span style={{ fontSize:11, fontWeight:700, padding:'1px 6px', borderRadius:10, background:'var(--bg-3)', color: countColor }}>{count}</span>}
     </button>
@@ -297,7 +310,7 @@ function Tab({ active, onClick, label, count, countColor }) {
 function CourierCard({ order, delay, isAvailable, onAssociate, onNavigate, onConfirm, onClick }) {
   const cfg = STATUS_CONFIG[order.status]
   return (
-    <div style={{ background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, opacity:0, animationDelay:`${delay}s`, cursor:'pointer' }} className="slide-in" onClick={onClick} onClickCapture={e => { if (e.target.closest("button")) e.stopPropagation() }}>
+    <div style={{ background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, opacity:0, animationDelay:`${delay}s`, cursor:'pointer' }} className="slide-in" onClick={onClick}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <span style={{ fontFamily:'var(--mono)', fontSize:10, fontWeight:600, color:'var(--text-3)', letterSpacing:'0.5px' }}># {order.id}</span>
         <span style={{ padding:'2px 9px', borderRadius:20, fontSize:10, fontWeight:700, color: cfg.color, background: cfg.bg }}>{cfg.label}</span>
@@ -372,6 +385,7 @@ const s = {
   toolbar:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 14px', background:'var(--bg-2)', borderBottom:'1px solid var(--border)', flexShrink:0 },
   tabs:{ display:'flex', gap:2 },
   addBtn:{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:13, fontWeight:700 },
+  refreshBtn:{ display:'flex', alignItems:'center', justifyContent:'center', padding:'8px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-2)', cursor:'pointer' },
   list:{ flex:1, overflowY:'auto', padding:'10px 14px', display:'flex', flexDirection:'column', gap:8 },
   empty:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px', gap:12, textAlign:'center' },
   emptyTitle:{ fontSize:15, fontWeight:600, color:'var(--text-2)' },
