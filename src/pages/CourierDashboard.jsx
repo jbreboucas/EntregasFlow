@@ -1,3 +1,4 @@
+import DatePicker from '../components/DatePicker'
 import OrderDetailModal from '../components/OrderDetailModal'
 import AddressAutocomplete from '../components/AddressAutocomplete'
 import { useState, useEffect } from 'react'
@@ -38,7 +39,7 @@ export default function CourierDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [form, setForm]         = useState({
     id_externo: '', cliente_nome: '', cliente_telefone: '', endereco: '',
-    localizacao_carro: '', lat: null, lng: null
+    localizacao_carro: '', data_pedido: '', lat: null, lng: null
   })
 
   useEffect(() => {
@@ -85,6 +86,7 @@ export default function CourierDashboard() {
       ...(form.cliente_nome      && { cliente_nome:      form.cliente_nome.trim() }),
       ...(form.cliente_telefone  && { cliente_telefone:  form.cliente_telefone.trim() }),
       ...(form.localizacao_carro && { localizacao_carro: form.localizacao_carro }),
+      ...(form.data_pedido       && { data_pedido:       form.data_pedido }),
       ...(form.id_externo.trim() && { id: form.id_externo.trim() }),
     }
 
@@ -216,6 +218,14 @@ export default function CourierDashboard() {
               {/* Telefone — opcional */}
               <FormField icon={Phone} label="Telefone" placeholder="(85) 98765-4321" optional
                 value={form.cliente_telefone} onChange={v => setForm(p => ({ ...p, cliente_telefone: v }))} />
+
+              {/* Data do pedido */}
+              <DatePicker
+                label="📅 Data do pedido"
+                value={form.data_pedido}
+                onChange={v => setForm(p => ({ ...p, data_pedido: v }))}
+                optional
+              />
 
               {/* Localização no carro */}
               <div>

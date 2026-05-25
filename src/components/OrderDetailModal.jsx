@@ -1,3 +1,4 @@
+import DatePicker from './DatePicker'
 import { useState } from 'react'
 import { X, Phone, MapPin, User, Clock, Camera, Edit2, Check, AlertCircle } from 'lucide-react'
 import { updatePedido } from '../lib/supabase'
@@ -121,9 +122,11 @@ export default function OrderDetailModal({ order, onClose, allowCarEdit }) {
                     <EditInput value={form.endereco} onChange={v => setForm(f => ({ ...f, endereco: v }))} placeholder="Endereço de entrega" icon={MapPin} />
                   </div>
                   <div>
-                    <label style={s.lbl}>Data do pedido</label>
-                    <input type="date" value={form.data_pedido} onChange={e => setForm(f => ({ ...f, data_pedido: e.target.value }))}
-                      style={{ ...s.dateInput }} />
+                    <DatePicker
+                      label="Data do pedido"
+                      value={form.data_pedido}
+                      onChange={v => setForm(f => ({ ...f, data_pedido: v }))}
+                    />
                   </div>
                 </>
               ) : (

@@ -1,3 +1,4 @@
+import DatePicker from '../components/DatePicker'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, useOrders } from '../App'
@@ -285,11 +286,12 @@ export default function AdminDashboard() {
                 value={form.cliente_telefone} onChange={v => setForm(p => ({ ...p, cliente_telefone: v }))} />
 
               {/* Data do pedido */}
-              <div>
-                <label style={s.fieldLabel}>📅 Data do pedido <span style={{ color:'var(--text-3)', fontSize:11 }}>(opcional)</span></label>
-                <input type="date" style={s.dateInput} value={form.data_pedido}
-                  onChange={e => setForm(p => ({ ...p, data_pedido: e.target.value }))} />
-              </div>
+              <DatePicker
+                label="📅 Data do pedido"
+                value={form.data_pedido}
+                onChange={v => setForm(p => ({ ...p, data_pedido: v }))}
+                optional
+              />
 
               {/* Localização no carro */}
               <div>

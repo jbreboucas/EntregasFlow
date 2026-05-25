@@ -5,6 +5,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
+// ─── Auth ──────────────────────────────────────────────────────────────────────
 export const signIn = (email, password) =>
   supabase.auth.signInWithPassword({ email, password })
 
@@ -17,6 +18,7 @@ export const getProfile = async (userId) => {
   return data
 }
 
+// ─── Pedidos ───────────────────────────────────────────────────────────────────
 export const getPedidos = () =>
   supabase.from('pedidos').select('*').order('criado_em', { ascending: false })
 
@@ -31,22 +33,16 @@ export const subscribePedidos = (callback) =>
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, callback)
     .subscribe()
 
+// ─── Entregas ──────────────────────────────────────────────────────────────────
 export const createEntrega = (data) =>
   supabase.from('entregas').insert(data).select().single()
 
-export const uploadFoto = async (orderId, file) => {
-  const ext  = file.name?.split('.').pop() || 'jpg'
-  const path = `${orderId}/foto_${Date.now()}.${ext}`
-  const { error } = await supabase.storage
-    .from('confirmacoes').upload(path, file, { upsert: true })
-  if (error) throw error
-  return supabase.storage.from('confirmacoes').getPublicUrl(path).data.publicUrl
-}
-
-export const uploadAssinatura = async (orderId, blob) => {
-  const path = `${orderId}/assinatura_${Date.now()}.png`
-  const { error } = await supabase.storage
-    .from('confirmacoes').upload(path, blob, { contentType: 'image/png', upsert: true })
-  if (error) throw error
-  return supabase.storage.from('confirmacoes').getPublicUrl(path).data.publicUrl
-}
+// ─── Foto: converte para base64 e salva direto no banco ────────────────────────
+// Evita dependência do Supabase Storage (sem RLS extra)
+export const prepararFoto = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result) // retorna data:image/jpeg;base64,...
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
