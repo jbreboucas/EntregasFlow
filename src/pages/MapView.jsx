@@ -73,7 +73,8 @@ export default function MapView() {
   const routeLines = useRef([])
   const stopMkrs   = useRef([])
   const origin     = useRef(null)
-  const routeBuilt = useRef(false)
+  const routeBuiltFallback = useRef(false)
+  const routeBuiltGPS     = useRef(false)
   const dragSrc    = useRef(null)      // índice de origem do drag (touch e mouse)
   const listRef    = useRef(null)      // ref da lista de reordenação
 
@@ -100,7 +101,7 @@ export default function MapView() {
     L.control.zoom({ position:'bottomright' }).addTo(map)
     mapInst.current = map
     setMapReady(true)
-    return () => { map.remove(); mapInst.current = null; routeBuilt.current = false; setMapReady(false) }
+    return () => { map.remove(); mapInst.current = null; routeBuiltFallback.current = false; routeBuiltGPS.current = false; setMapReady(false) }
   }, [pedidos])
 
   // ── GPS ───────────────────────────────────────────────────────────────────────
@@ -161,10 +162,21 @@ export default function MapView() {
   }, [pedidos, order, activeIdx])
 
   useEffect(() => {
-    if (!mapReady || pedidos.length === 0 || routeBuilt.current) return
-    if (!gpsReady) return   // aguarda GPS ou timeout
-    routeBuilt.current = true
-    buildRoutes(gpsPos || null)
+    if (!mapReady || pedidos.length === 0) return
+    if (!gpsReady) return
+
+    if (gpsPos) {
+      // GPS real disponível — sempre reconstrói com posição real
+      if (routeBuiltGPS.current) return
+      routeBuiltGPS.current = true
+      routeBuiltFallback.current = true
+      buildRoutes(gpsPos)
+    } else {
+      // Sem GPS — usa fallback apenas uma vez
+      if (routeBuiltFallback.current) return
+      routeBuiltFallback.current = true
+      buildRoutes(null)
+    }
   }, [mapReady, pedidos, gpsReady, gpsPos, buildRoutes])
 
   const selectStop = (seqIdx) => {
@@ -237,8 +249,12 @@ export default function MapView() {
     const [moved]  = newOrder.splice(fromIdx, 1)
     newOrder.splice(toIdx, 0, moved)
     setOrder(newOrder); setActiveIdx(0)
-    routeBuilt.current = false
-    setTimeout(() => { routeBuilt.current = true; buildRoutes(gpsPos||origin.current) }, 100)
+    routeBuiltFallback.current = false
+    routeBuiltGPS.current = false
+    setTimeout(() => {
+      if (gpsPos) { routeBuiltGPS.current = true; buildRoutes(gpsPos) }
+      else { routeBuiltFallback.current = true; buildRoutes(origin.current) }
+    }, 100)
     speak(`Ordem atualizada. Parada 1: ${pedidos[newOrder[0]]?.cliente_nome||pedidos[newOrder[0]]?.endereco}`)
   }
 
