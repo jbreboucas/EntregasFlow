@@ -63,9 +63,10 @@ export default function MapView() {
   const [routeData,   setRouteData]   = useState([])
   const [loadingIdx,  setLoadingIdx]  = useState([])
   const [routeState,  setRouteState]  = useState(ROUTE_IDLE)
-  const [showReorder, setShowReorder] = useState(false)
-  const [dragOver,    setDragOver]    = useState(null)
-  const [mapReady,    setMapReady]    = useState(false)
+  const [showReorder,  setShowReorder]  = useState(false)
+  const [dragOver,     setDragOver]     = useState(null)
+  const [mapReady,     setMapReady]     = useState(false)
+  const [showNavApps,  setShowNavApps]  = useState(false)
 
   const mapRef     = useRef(null)
   const mapInst    = useRef(null)
@@ -266,6 +267,22 @@ export default function MapView() {
   }
 
   const centerOnMe = () => { if (gpsPos && mapInst.current) mapInst.current.setView([gpsPos.lat,gpsPos.lng],16,{animate:true}) }
+
+  const openNavApp = (app) => {
+    const ped = orderedPedidos[activeIdx]
+    if (!ped) return
+    const lat = ped.lat || -3.7317
+    const lng = ped.lng || -38.5267
+    const addr = encodeURIComponent(ped.endereco || '')
+    const urls = {
+      waze:   `waze://?ll=${lat},${lng}&navigate=yes&zoom=17`,
+      gmaps:  `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
+      amaps:  `maps://?daddr=${lat},${lng}`,
+      moovit: `moovit://directions?dest_lat=${lat}&dest_lon=${lng}`,
+    }
+    window.open(urls[app], '_blank')
+    setShowNavApps(false)
+  }
 
   // ── Controles voz ─────────────────────────────────────────────────────────────
   const startRoute = () => {
@@ -481,10 +498,37 @@ export default function MapView() {
               <a href={`tel:${currentOrder.cliente_telefone}`} style={s.callBtn}>
                 <Phone size={15}/> Ligar
               </a>
+              <button style={s.navAppBtn} onClick={() => setShowNavApps(v => !v)}>
+                <span style={{ fontSize:16 }}>🧭</span> Navegar
+              </button>
               <button style={s.confirmBtn} onClick={()=>navigate(`/confirm/${currentOrder.id}`)}>
-                <CheckCircle size={16}/> Confirmar entrega
+                <CheckCircle size={16}/> Confirmar
               </button>
             </div>
+
+            {/* Seletor de app de navegação */}
+            {showNavApps && (
+              <div style={s.navAppsPanel} className="fade-up">
+                <div style={s.navAppsTitle}>Abrir navegação em:</div>
+                <div style={s.navAppsGrid}>
+                  {[
+                    { id:'waze',  label:'Waze',         emoji:'🟦', color:'#33CCFF' },
+                    { id:'gmaps', label:'Google Maps',   emoji:'🗺️', color:'#34A853' },
+                    { id:'amaps', label:'Apple Maps',    emoji:'🍎', color:'#A0C4FF' },
+                    { id:'moovit',label:'Moovit',        emoji:'🚌', color:'#F5A623' },
+                  ].map(app => (
+                    <button key={app.id} style={{ ...s.navAppItem, borderColor: app.color + '55' }}
+                      onClick={() => openNavApp(app.id)}>
+                      <span style={{ fontSize:26 }}>{app.emoji}</span>
+                      <span style={{ fontSize:11, fontWeight:600, color:'var(--text-2)' }}>{app.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <button style={s.navAppsCancelBtn} onClick={() => setShowNavApps(false)}>
+                  Cancelar
+                </button>
+              </div>
+            )}
           </>
         )}
 
@@ -536,7 +580,13 @@ const s = {
   stopBadge: { width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
   deliveryBtns:{ display:'flex', gap:10, marginBottom:12 },
   callBtn:   { flex:1, padding:'11px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:7, textDecoration:'none' },
-  confirmBtn:{ flex:2.5, padding:'11px 0', background:'var(--accent)', borderRadius:10, color:'#080D1A', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:8 },
+  navAppBtn: { flex:1, padding:'11px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:6 },
+  navAppsPanel: { background:'var(--bg-3)', border:'1px solid var(--border-2)', borderRadius:14, padding:'14px 12px 12px', marginBottom:12 },
+  navAppsTitle: { fontSize:12, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:12, textAlign:'center' },
+  navAppsGrid: { display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, marginBottom:10 },
+  navAppItem: { display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'12px 6px', borderRadius:12, background:'var(--bg-2)', border:'1px solid', cursor:'pointer' },
+  navAppsCancelBtn: { width:'100%', padding:'9px', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:9, color:'var(--text-3)', fontSize:13, fontWeight:500, cursor:'pointer' },
+  confirmBtn:{ flex:1.5, padding:'11px 0', background:'var(--accent)', borderRadius:10, color:'#080D1A', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 },
   routeControls:{ display:'flex', gap:8 },
   startBtn:  { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--accent)', color:'#080D1A', borderRadius:10, fontSize:14, fontWeight:800 },
   pauseBtn:  { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--pending-bg)', border:'1px solid rgba(245,158,11,0.3)', color:'var(--pending)', borderRadius:10, fontSize:14, fontWeight:700 },
