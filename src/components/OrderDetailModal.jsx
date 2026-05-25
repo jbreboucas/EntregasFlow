@@ -1,3 +1,4 @@
+import ReceiptGenerator from './ReceiptGenerator'
 import DatePicker from './DatePicker'
 import { useState, useRef, useEffect } from 'react'
 import { X, Phone, MapPin, User, Clock, Camera, Edit2, Check, AlertCircle } from 'lucide-react'
@@ -195,6 +196,19 @@ export default function OrderDetailModal({ order, onClose, allowCarEdit }) {
                     <AlertCircle size={14} /> Foto não disponível
                   </div>
                 )}
+
+                {/* Recibo exportável */}
+                <div style={{ paddingTop:14, borderTop:'1px solid var(--border)' }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'var(--text-2)', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
+                    <span style={{ fontSize:16 }}>🧾</span> Exportar recibo
+                  </div>
+                  <ReceiptGenerator
+                    order={order}
+                    recebidoPor={order.recebido_por || '—'}
+                    fotoBase64={order.foto_entrega_url}
+                    courierName={order.entregador_nome}
+                  />
+                </div>
               </div>
             )}
           </div>

@@ -1,3 +1,4 @@
+import ReceiptGenerator from '../components/ReceiptGenerator'
 import { useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useOrders, useAuth } from '../App'
@@ -198,7 +199,20 @@ export default function DeliveryConfirm() {
                 style={{ width:'100%', maxWidth:300, borderRadius:10, border:'1px solid var(--border)', objectFit:'cover', maxHeight:180 }} />
             )}
 
-            <button style={{ ...s.primaryBtn, marginTop:8 }} onClick={() => navigate('/courier')}>
+            {/* Recibo de entrega para compartilhar no WhatsApp */}
+            <div style={{ width:'100%', maxWidth:420 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:'var(--text-2)', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ fontSize:18 }}>🧾</span> Recibo de entrega
+              </div>
+              <ReceiptGenerator
+                order={order}
+                recebidoPor={recebidoPor}
+                fotoBase64={preview}
+                courierName={user?.name}
+              />
+            </div>
+
+            <button style={{ ...s.primaryBtn }} onClick={() => navigate('/courier')}>
               Voltar ao painel
             </button>
           </div>
