@@ -1,3 +1,4 @@
+import OrderDetailModal from '../components/OrderDetailModal'
 import AddressAutocomplete from '../components/AddressAutocomplete'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -33,6 +34,7 @@ export default function CourierDashboard() {
   const [tab, setTab]           = useState('available')
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving]     = useState(false)
+  const [selected, setSelected] = useState(null)
   const [form, setForm]         = useState({
     id_externo: '', cliente_nome: '', cliente_telefone: '', endereco: '',
     localizacao_carro: '', lat: null, lng: null
@@ -98,6 +100,7 @@ export default function CourierDashboard() {
   }
 
   const shown = tab === 'available' ? available : myOrders
+  const selectedOrder = selected ? orders.find(o => o.id === selected.id) : null
 
   return (
     <div style={s.page}>
@@ -166,7 +169,8 @@ export default function CourierDashboard() {
               isAvailable={tab === 'available'}
               onAssociate={() => associate(order.id)}
               onNavigate={() => navigate(`/map/single/${order.id}`)}
-              onConfirm={() => navigate(`/confirm/${order.id}`)} />
+              onConfirm={() => navigate(`/confirm/${order.id}`)}
+              onClick={() => setSelected(order)} />
           ))
         }
       </div>
@@ -238,6 +242,16 @@ export default function CourierDashboard() {
         </div>
       )}
     </div>
+
+      {/* Modal detalhe */}
+      {selectedOrder && (
+        <OrderDetailModal
+          order={selectedOrder}
+          onClose={() => setSelected(null)}
+          allowCarEdit={!selectedOrder.entregador_id || selectedOrder.entregador_id !== user?.id}
+        />
+      )}
+    </div>
   )
 }
 
@@ -281,10 +295,10 @@ function Tab({ active, onClick, label, count, countColor }) {
   )
 }
 
-function CourierCard({ order, delay, isAvailable, onAssociate, onNavigate, onConfirm }) {
+function CourierCard({ order, delay, isAvailable, onAssociate, onNavigate, onConfirm, onClick }) {
   const cfg = STATUS_CONFIG[order.status]
   return (
-    <div style={{ background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, opacity:0, animationDelay:`${delay}s` }} className="slide-in">
+    <div style={{ background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, opacity:0, animationDelay:`${delay}s`, cursor:'pointer' }} className="slide-in" onClick={onClick}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <span style={{ fontFamily:'var(--mono)', fontSize:10, fontWeight:600, color:'var(--text-3)', letterSpacing:'0.5px' }}># {order.id}</span>
         <span style={{ padding:'2px 9px', borderRadius:20, fontSize:10, fontWeight:700, color: cfg.color, background: cfg.bg }}>{cfg.label}</span>
@@ -312,10 +326,10 @@ function CourierCard({ order, delay, isAvailable, onAssociate, onNavigate, onCon
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:10, borderTop:'1px solid var(--border)', marginTop:2 }}>
         <span style={{ fontSize:11, color:'var(--text-3)' }}>{timeAgo(order.criado_em)}</span>
         <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-          {isAvailable && <button style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', background:'var(--accent)', color:'#080D1A', borderRadius:8, fontSize:13, fontWeight:700 }} onClick={onAssociate}><Link2 size={14} /> Assumir</button>}
+          {isAvailable && <button style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', background:'var(--accent)', color:'#080D1A', borderRadius:8, fontSize:13, fontWeight:700 }} onClick={e => { e.stopPropagation(); onAssociate() }}><Link2 size={14} /> Assumir</button>}
           {!isAvailable && order.status === 'em_rota' && <>
-            <button style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', background:'var(--in-route-bg)', border:'1px solid rgba(96,165,250,0.3)', borderRadius:8, fontSize:12, fontWeight:600, color:'var(--in-route)' }} onClick={onNavigate}><Navigation size={14} /> GPS</button>
-            <button style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', background:'var(--accent)', color:'#080D1A', borderRadius:8, fontSize:12, fontWeight:700 }} onClick={onConfirm}><CheckCircle size={14} /> Confirmar</button>
+            <button style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', background:'var(--in-route-bg)', border:'1px solid rgba(96,165,250,0.3)', borderRadius:8, fontSize:12, fontWeight:600, color:'var(--in-route)' }} onClick={e => { e.stopPropagation(); onNavigate() }}><Navigation size={14} /> GPS</button>
+            <button style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', background:'var(--accent)', color:'#080D1A', borderRadius:8, fontSize:12, fontWeight:700 }} onClick={e => { e.stopPropagation(); onConfirm() }}><CheckCircle size={14} /> Confirmar</button>
           </>}
           {!isAvailable && order.status === 'entregue' && (
             <span style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, fontWeight:600, color:'var(--delivered)', padding:'5px 10px', background:'var(--delivered-bg)', borderRadius:8 }}>

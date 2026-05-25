@@ -38,17 +38,17 @@ export default function DeliveryConfirm() {
 
       await Promise.all([
         createEntrega({ pedido_id: orderId, entregador_id: user.id, foto_url, recebido_por: recebido }),
-        updatePedido(orderId, { status: 'entregue', recebido_por: recebido }),
+        updatePedido(orderId, { status: 'entregue', recebido_por: recebido, foto_entrega_url: foto_url }),
       ])
 
-      updateOrder(orderId, { status: 'entregue', recebido_por: recebido })
+      updateOrder(orderId, { status: 'entregue', recebido_por: recebido, foto_entrega_url: foto_url })
       setStep('done')
     } catch (err) {
       console.error(err)
       // fallback sem upload
       const recebido = recebidoPor.trim()
-      await updatePedido(orderId, { status: 'entregue', recebido_por: recebido })
-      updateOrder(orderId, { status: 'entregue', recebido_por: recebido })
+      await updatePedido(orderId, { status: 'entregue', recebido_por: recebido, foto_entrega_url: foto_url })
+      updateOrder(orderId, { status: 'entregue', recebido_por: recebido, foto_entrega_url: foto_url })
       setStep('done')
     }
     setSubmitting(false)
@@ -114,18 +114,12 @@ export default function DeliveryConfirm() {
               </button>
             )}
 
-            <div style={{ display:'flex', gap:10, marginTop:24 }}>
-              <button style={{ ...s.secondaryBtn }}
-                onClick={() => setStep('recipient')}>
-                Pular foto →
-              </button>
-              <button
-                style={{ ...s.primaryBtn, flex:2, opacity: photo ? 1 : 0.38 }}
-                disabled={!photo}
-                onClick={() => setStep('recipient')}>
-                Próximo →
-              </button>
-            </div>
+            <button
+              style={{ ...s.primaryBtn, marginTop:24, opacity: photo ? 1 : 0.38 }}
+              disabled={!photo}
+              onClick={() => setStep('recipient')}>
+              Próximo →
+            </button>
           </div>
         )}
 
@@ -255,7 +249,6 @@ const s = {
 
   // Botões
   primaryBtn: { display:'flex', alignItems:'center', justifyContent:'center', gap:9, width:'100%', padding:'15px 20px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:15, fontWeight:800, transition:'opacity 0.2s' },
-  secondaryBtn: { flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'15px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-2)', fontSize:14, fontWeight:500 },
 
   // Done
   done: { display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', paddingTop:32, gap:18 },
