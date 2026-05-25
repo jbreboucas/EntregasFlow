@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, useOrders } from '../App'
 import { STATUS_CONFIG, timeAgo } from '../lib/mockData'
@@ -7,7 +7,8 @@ import AddressAutocomplete from '../components/AddressAutocomplete'
 import OrderDetailModal from '../components/OrderDetailModal'
 import {
   LogOut, Plus, Phone, MapPin, User, Package,
-  Clock, CheckCircle, Truck, Search, X, ChevronRight, Hash, RefreshCw,
+  Clock, CheckCircle, Truck, Search, X, ChevronRight,
+  Hash, RefreshCw, Filter, Calendar,
 } from 'lucide-react'
 
 const CAR_POSITIONS = [
@@ -25,12 +26,26 @@ export default function AdminDashboard() {
   const { user, logout } = useAuth()
   const { orders, setOrders, updateOrder } = useOrders()
   const navigate = useNavigate()
+
   const [search,      setSearch]      = useState('')
   const [showModal,   setShowModal]   = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
   const [selectedId,  setSelectedId]  = useState(null)
   const [saving,      setSaving]      = useState(false)
   const [refreshing,  setRefreshing]  = useState(false)
-  const [form, setForm] = useState({ id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'', localizacao_carro:'', lat:null, lng:null })
+  const [dragId,      setDragId]      = useState(null)
+  const [dragOver,    setDragOver]    = useState(null)
+
+  // Filtros
+  const [filterCourier,   setFilterCourier]   = useState('')
+  const [filterDateStart, setFilterDateStart] = useState('')
+  const [filterDateEnd,   setFilterDateEnd]   = useState('')
+
+  // Formulário novo pedido
+  const [form, setForm] = useState({
+    id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'',
+    localizacao_carro:'', data_pedido:'', lat:null, lng:null,
+  })
 
   useEffect(() => {
     getPedidos().then(({ data }) => { if (data) setOrders(data) })
@@ -42,8 +57,7 @@ export default function AdminDashboard() {
     return () => ch.unsubscribe()
   }, [])
 
-  const handleLogout = async () => { await logout(); navigate('/login') }
-
+  const handleLogout  = async () => { await logout(); navigate('/login') }
   const handleRefresh = async () => {
     setRefreshing(true)
     const { data } = await getPedidos()
@@ -51,12 +65,34 @@ export default function AdminDashboard() {
     setRefreshing(false)
   }
 
-  const filtered = useMemo(() =>
-    orders.filter(o => !search ||
-      o.cliente_nome?.toLowerCase().includes(search.toLowerCase()) ||
-      o.id?.toLowerCase().includes(search.toLowerCase()) ||
-      o.endereco?.toLowerCase().includes(search.toLowerCase())
-    ), [orders, search])
+  // Lista de entregadores únicos para o filtro
+  const couriers = useMemo(() => {
+    const map = {}
+    orders.forEach(o => { if (o.entregador_id && o.entregador_nome) map[o.entregador_id] = o.entregador_nome })
+    return Object.entries(map).map(([id, name]) => ({ id, name }))
+  }, [orders])
+
+  const activeFilters = [filterCourier, filterDateStart, filterDateEnd].filter(Boolean).length
+
+  const filtered = useMemo(() => {
+    return orders.filter(o => {
+      if (search && !(
+        o.cliente_nome?.toLowerCase().includes(search.toLowerCase()) ||
+        o.id?.toLowerCase().includes(search.toLowerCase()) ||
+        o.endereco?.toLowerCase().includes(search.toLowerCase())
+      )) return false
+      if (filterCourier && o.entregador_id !== filterCourier) return false
+      if (filterDateStart) {
+        const d = new Date(o.data_pedido || o.criado_em)
+        if (d < new Date(filterDateStart)) return false
+      }
+      if (filterDateEnd) {
+        const d = new Date(o.data_pedido || o.criado_em)
+        if (d > new Date(filterDateEnd + 'T23:59:59')) return false
+      }
+      return true
+    })
+  }, [orders, search, filterCourier, filterDateStart, filterDateEnd])
 
   const byStatus = (st) => filtered.filter(o => o.status === st)
   const counts = {
@@ -74,23 +110,39 @@ export default function AdminDashboard() {
       ...(form.cliente_nome      && { cliente_nome:      form.cliente_nome.trim() }),
       ...(form.cliente_telefone  && { cliente_telefone:  form.cliente_telefone.trim() }),
       ...(form.localizacao_carro && { localizacao_carro: form.localizacao_carro }),
+      ...(form.data_pedido       && { data_pedido:       form.data_pedido }),
       ...(form.lat               && { lat: form.lat }),
       ...(form.lng               && { lng: form.lng }),
       ...(form.id_externo.trim() && { id: form.id_externo.trim() }),
     }
     const { data, error } = await createPedido(payload)
     if (!error && data) setOrders(prev => [data, ...prev])
-    setForm({ id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'', localizacao_carro:'', lat:null, lng:null })
+    setForm({ id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'', localizacao_carro:'', data_pedido:'', lat:null, lng:null })
     setShowModal(false)
     setSaving(false)
   }
 
-  const handleMove = async (id, status) => {
-    updateOrder(id, { status })
-    await updatePedido(id, { status })
+  // Drag & drop handlers
+  const handleDragStart = (e, orderId) => {
+    setDragId(orderId)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const handleDragOver = (e, col) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOver(col)
+  }
+  const handleDrop = async (e, newStatus) => {
+    e.preventDefault()
+    setDragOver(null)
+    if (!dragId) return
+    const order = orders.find(o => o.id === dragId)
+    if (!order || order.status === newStatus) { setDragId(null); return }
+    updateOrder(dragId, { status: newStatus })
+    await updatePedido(dragId, { status: newStatus })
+    setDragId(null)
   }
 
-  // Atualiza o pedido selecionado quando orders muda (realtime)
   const selectedOrder = selectedId ? orders.find(o => o.id === selectedId) : null
 
   return (
@@ -134,7 +186,12 @@ export default function AdminDashboard() {
           {search && <button style={s.clearBtn} onClick={() => setSearch('')}><X size={13} /></button>}
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button style={s.refreshBtn} onClick={handleRefresh} title="Atualizar" disabled={refreshing}>
+          <button style={{ ...s.iconBtn2, ...(showFilters || activeFilters > 0 ? s.iconBtn2Active : {}) }}
+            onClick={() => setShowFilters(v => !v)}>
+            <Filter size={14} />
+            {activeFilters > 0 && <span style={s.filterBadge}>{activeFilters}</span>}
+          </button>
+          <button style={s.iconBtn2} onClick={handleRefresh} disabled={refreshing}>
             <RefreshCw size={14} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
           </button>
           <button style={s.addBtn} className="add-btn" onClick={() => setShowModal(true)}>
@@ -143,24 +200,59 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* Filtros */}
+      {showFilters && (
+        <div style={s.filterBar} className="fade-in">
+          <div style={s.filterGroup}>
+            <label style={s.filterLabel}><User size={12} /> Entregador</label>
+            <select style={s.filterSelect} value={filterCourier} onChange={e => setFilterCourier(e.target.value)}>
+              <option value="">Todos</option>
+              {couriers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div style={s.filterGroup}>
+            <label style={s.filterLabel}><Calendar size={12} /> De</label>
+            <input type="date" style={s.filterDate} value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
+          </div>
+          <div style={s.filterGroup}>
+            <label style={s.filterLabel}><Calendar size={12} /> Até</label>
+            <input type="date" style={s.filterDate} value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
+          </div>
+          {activeFilters > 0 && (
+            <button style={s.clearFiltersBtn} onClick={() => { setFilterCourier(''); setFilterDateStart(''); setFilterDateEnd('') }}>
+              <X size={12} /> Limpar filtros
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Kanban */}
       <div style={s.kanban} className="kanban-grid">
         {['pendente','em_rota','entregue'].map(col => {
           const cfg   = STATUS_CONFIG[col]
           const cards = byStatus(col)
+          const isDragTarget = dragOver === col
           return (
-            <div key={col} style={s.column}>
+            <div key={col} style={{ ...s.column, ...(isDragTarget ? s.columnDragOver : {}) }}
+              onDragOver={e => handleDragOver(e, col)}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={e => handleDrop(e, col)}>
               <div style={s.colHead}>
                 <div style={{ ...s.colDot, background: cfg.color }} />
                 <span style={s.colTitle}>{cfg.label}</span>
                 <div style={{ ...s.colBadge, color: cfg.color, background: cfg.bg }}>{cards.length}</div>
               </div>
+              {isDragTarget && (
+                <div style={s.dropHint}>Soltar aqui para mover para <strong>{cfg.label}</strong></div>
+              )}
               <div style={s.cardList}>
                 {cards.length === 0
                   ? <div style={s.emptyCol}><Package size={26} color="var(--text-3)" /><span style={s.emptyTxt}>Nenhum pedido</span></div>
                   : cards.map((order, i) => (
-                    <AdminCard key={order.id} order={order} delay={i*0.05}
-                      onMove={handleMove}
+                    <AdminCard key={order.id} order={order} delay={i*0.04}
+                      isDragging={dragId === order.id}
+                      onDragStart={e => handleDragStart(e, order.id)}
+                      onDragEnd={() => setDragId(null)}
                       onClick={() => setSelectedId(order.id)} />
                   ))
                 }
@@ -179,30 +271,29 @@ export default function AdminDashboard() {
               <button style={s.iconBtn} onClick={() => setShowModal(false)}><X size={16} /></button>
             </div>
             <div style={s.modalBody}>
-              {/* ID manual */}
               <FormField icon={Hash} label="Nº do pedido" placeholder="Auto (ex: PED-042)" optional
                 value={form.id_externo} onChange={v => setForm(p => ({ ...p, id_externo: v }))} />
 
-              {/* Endereço autocomplete */}
-              <AddressAutocomplete
-                value={form.endereco}
+              <AddressAutocomplete value={form.endereco}
                 onChange={v => setForm(p => ({ ...p, endereco: v }))}
-                onSelect={({ address, lat, lng }) => setForm(p => ({ ...p, endereco: address, lat, lng }))}
-              />
+                onSelect={({ address, lat, lng }) => setForm(p => ({ ...p, endereco: address, lat, lng }))} />
 
-              {/* Nome */}
               <FormField icon={User} label="Nome do cliente" placeholder="Ana Beatriz Silva" optional
                 value={form.cliente_nome} onChange={v => setForm(p => ({ ...p, cliente_nome: v }))} />
 
-              {/* Telefone */}
               <FormField icon={Phone} label="Telefone" placeholder="(85) 98765-4321" optional
                 value={form.cliente_telefone} onChange={v => setForm(p => ({ ...p, cliente_telefone: v }))} />
 
+              {/* Data do pedido */}
+              <div>
+                <label style={s.fieldLabel}>📅 Data do pedido <span style={{ color:'var(--text-3)', fontSize:11 }}>(opcional)</span></label>
+                <input type="date" style={s.dateInput} value={form.data_pedido}
+                  onChange={e => setForm(p => ({ ...p, data_pedido: e.target.value }))} />
+              </div>
+
               {/* Localização no carro */}
               <div>
-                <label style={s.fieldLabel}>
-                  📦 Localização no carro <span style={{ color:'var(--text-3)', fontSize:11 }}>(opcional)</span>
-                </label>
+                <label style={s.fieldLabel}>📦 Localização no carro <span style={{ color:'var(--text-3)', fontSize:11 }}>(opcional)</span></label>
                 <div style={s.carGrid}>
                   {CAR_POSITIONS.map(pos => (
                     <button key={pos.id} type="button"
@@ -217,10 +308,8 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <button
-                style={{ ...s.addBtn, width:'100%', justifyContent:'center', padding:'13px', fontSize:14, marginTop:4, opacity: (!form.endereco.trim() || saving) ? 0.38 : 1 }}
-                disabled={!form.endereco.trim() || saving}
-                onClick={handleCreate}>
+              <button style={{ ...s.addBtn, width:'100%', justifyContent:'center', padding:'13px', fontSize:14, marginTop:4, opacity:(!form.endereco.trim() || saving) ? 0.38 : 1 }}
+                disabled={!form.endereco.trim() || saving} onClick={handleCreate}>
                 {saving ? 'Criando…' : <><Plus size={15} /> Criar pedido</>}
               </button>
             </div>
@@ -228,13 +317,8 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Modal detalhe */}
       {selectedOrder && (
-        <OrderDetailModal
-          order={selectedOrder}
-          onClose={() => setSelectedId(null)}
-          allowCarEdit={false}
-        />
+        <OrderDetailModal order={selectedOrder} onClose={() => setSelectedId(null)} allowCarEdit={false} />
       )}
     </div>
   )
@@ -255,33 +339,35 @@ function FormField({ icon:Icon, label, placeholder, optional, value, onChange })
   )
 }
 
-function AdminCard({ order, delay, onMove, onClick }) {
+function AdminCard({ order, delay, isDragging, onDragStart, onDragEnd, onClick }) {
   const cfg = STATUS_CONFIG[order.status]
   return (
-    <div style={{ ...s.card, animationDelay:`${delay}s`, cursor:'pointer' }}
-      className="slide-in"
-      onClick={onClick}>
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onClick={onClick}
+      style={{ ...s.card, animationDelay:`${delay}s`, opacity: isDragging ? 0.4 : 0, cursor:'grab' }}
+      className="slide-in">
       <div style={s.cardTop}>
         <span style={s.cardId}># {order.id}</span>
         <span style={{ ...s.pill, color: cfg.color, background: cfg.bg }}>{cfg.label}</span>
       </div>
-      <div style={s.cardName}>{order.cliente_nome || <span style={{ color:'var(--text-3)', fontStyle:'italic', fontWeight:400, fontSize:13 }}>Sem nome</span>}</div>
+      <div style={s.cardName}>
+        {order.cliente_nome || <span style={{ color:'var(--text-3)', fontStyle:'italic', fontWeight:400, fontSize:13 }}>Sem nome</span>}
+      </div>
       <div style={s.infoList}>
         {order.cliente_telefone && <Row icon={Phone} text={order.cliente_telefone} />}
         <Row icon={MapPin} text={order.endereco} truncate />
+        {order.data_pedido && <Row icon={Calendar} text={new Date(order.data_pedido).toLocaleDateString('pt-BR')} />}
         {order.entregador_nome && <Row icon={User} text={order.entregador_nome} accent />}
         {order.recebido_por && <Row icon={CheckCircle} text={`Recebido por ${order.recebido_por}`} delivered />}
       </div>
       <div style={s.cardFoot}>
         <span style={s.cardTime}>{timeAgo(order.criado_em)}</span>
-        <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-          <span style={{ fontSize:11, color:'var(--text-3)' }}>Ver detalhes →</span>
-          {cfg.next && (
-            <button style={s.advBtn} onClick={e => { e.stopPropagation(); onMove(order.id, cfg.next) }}>
-              {cfg.nextLabel} <ChevronRight size={12} />
-            </button>
-          )}
-        </div>
+        <span style={{ fontSize:11, color:'var(--text-3)', display:'flex', alignItems:'center', gap:3 }}>
+          Ver detalhes <ChevronRight size={11} />
+        </span>
       </div>
     </div>
   )
@@ -314,22 +400,32 @@ const s = {
   avatar:{ width:24, height:24, borderRadius:6, background:'var(--accent-dim)', border:'1px solid var(--accent-border)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:700, color:'var(--accent)', fontFamily:'var(--mono)' },
   userName:{ fontSize:13, fontWeight:500, color:'var(--text-1)' },
   iconBtn:{ padding:7, background:'transparent', color:'var(--text-3)', border:'1px solid var(--border)', borderRadius:7, display:'flex', alignItems:'center' },
-  toolbar:{ display:'flex', gap:10, padding:'10px 20px', flexShrink:0, background:'var(--bg-2)', borderBottom:'1px solid var(--border)' },
+  iconBtn2:{ display:'flex', alignItems:'center', justifyContent:'center', position:'relative', padding:8, background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-2)', cursor:'pointer', flexShrink:0 },
+  iconBtn2Active:{ borderColor:'var(--accent-border)', color:'var(--accent)', background:'var(--accent-dim)' },
+  filterBadge:{ position:'absolute', top:-5, right:-5, width:16, height:16, borderRadius:'50%', background:'var(--accent)', color:'#080D1A', fontSize:9, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center' },
+  toolbar:{ display:'flex', gap:10, padding:'10px 20px', flexShrink:0, background:'var(--bg-2)', borderBottom:'1px solid var(--border)', alignItems:'center' },
   searchWrap:{ flex:1, position:'relative' },
   searchInput:{ width:'100%', padding:'8px 32px 8px 34px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-1)', fontSize:13 },
   clearBtn:{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', background:'transparent', color:'var(--text-3)', padding:2, borderRadius:4, display:'flex' },
   addBtn:{ padding:'8px 16px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap', flexShrink:0 },
-  refreshBtn:{ display:'flex', alignItems:'center', justifyContent:'center', padding:'8px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-2)', cursor:'pointer', flexShrink:0 },
+  filterBar:{ display:'flex', alignItems:'flex-end', gap:14, padding:'10px 20px', background:'var(--bg-2)', borderBottom:'1px solid var(--border)', flexShrink:0, flexWrap:'wrap' },
+  filterGroup:{ display:'flex', flexDirection:'column', gap:5 },
+  filterLabel:{ display:'flex', alignItems:'center', gap:4, fontSize:11, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.4px' },
+  filterSelect:{ padding:'7px 10px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-1)', fontSize:13, minWidth:160, fontFamily:'var(--font)' },
+  filterDate:{ padding:'7px 10px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-1)', fontSize:13, fontFamily:'var(--font)' },
+  clearFiltersBtn:{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', background:'var(--danger-bg)', border:'1px solid rgba(248,113,113,0.2)', borderRadius:8, color:'var(--danger)', fontSize:12, fontWeight:600, cursor:'pointer', marginBottom:0, alignSelf:'flex-end' },
   kanban:{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, padding:'12px 20px', flex:1, overflow:'hidden', alignItems:'start' },
-  column:{ display:'flex', flexDirection:'column', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', maxHeight:'calc(100vh - 130px)' },
+  column:{ display:'flex', flexDirection:'column', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', maxHeight:'calc(100vh - 130px)', transition:'border-color 0.15s, box-shadow 0.15s' },
+  columnDragOver:{ borderColor:'var(--accent)', boxShadow:`0 0 0 2px rgba(0,229,160,0.2)` },
   colHead:{ display:'flex', alignItems:'center', gap:8, padding:'11px 14px', borderBottom:'1px solid var(--border)', flexShrink:0 },
   colDot:{ width:8, height:8, borderRadius:'50%' },
   colTitle:{ fontSize:13, fontWeight:600, color:'var(--text-1)', flex:1 },
   colBadge:{ width:22, height:22, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700 },
+  dropHint:{ margin:'8px 8px 0', padding:'8px 12px', background:'var(--accent-dim)', border:'1px dashed var(--accent-border)', borderRadius:8, fontSize:12, color:'var(--accent)', textAlign:'center', flexShrink:0 },
   cardList:{ padding:8, display:'flex', flexDirection:'column', gap:7, overflowY:'auto', flex:1 },
   emptyCol:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'36px 20px', gap:10, opacity:0.5 },
   emptyTxt:{ fontSize:13, color:'var(--text-3)' },
-  card:{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'11px 13px', display:'flex', flexDirection:'column', gap:6, opacity:0, transition:'border-color 0.15s', ':hover':{ borderColor:'var(--border-2)' } },
+  card:{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'11px 13px', display:'flex', flexDirection:'column', gap:6, transition:'border-color 0.15s, box-shadow 0.15s' },
   cardTop:{ display:'flex', alignItems:'center', justifyContent:'space-between' },
   cardId:{ fontFamily:'var(--mono)', fontSize:10, fontWeight:600, color:'var(--text-3)', letterSpacing:'0.5px' },
   pill:{ padding:'2px 8px', borderRadius:20, fontSize:10, fontWeight:700 },
@@ -337,13 +433,13 @@ const s = {
   infoList:{ display:'flex', flexDirection:'column', gap:5 },
   cardFoot:{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:9, marginTop:3, borderTop:'1px solid var(--border)' },
   cardTime:{ fontSize:10, color:'var(--text-3)' },
-  advBtn:{ display:'flex', alignItems:'center', gap:4, padding:'4px 9px', background:'transparent', border:'1px solid var(--accent-border)', borderRadius:6, color:'var(--accent)', fontSize:11, fontWeight:600 },
   overlay:{ position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:500, padding:'0 16px' },
-  modal:{ width:'100%', maxWidth:460, margin:'0 16px', background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-lg)', boxShadow:'var(--shadow)', maxHeight:'90vh', overflowY:'auto', display:'flex', flexDirection:'column' },
+  modal:{ width:'100%', maxWidth:460, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-lg)', boxShadow:'var(--shadow)', maxHeight:'90vh', overflowY:'auto', display:'flex', flexDirection:'column' },
   modalHead:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 22px', borderBottom:'1px solid var(--border)', position:'sticky', top:0, background:'var(--bg-2)', zIndex:10 },
   modalTitle:{ fontSize:15, fontWeight:700, color:'var(--text-1)' },
   modalBody:{ padding:'18px 22px', display:'flex', flexDirection:'column', gap:14 },
   fieldLabel:{ fontSize:12, fontWeight:500, color:'var(--text-2)', marginBottom:8, display:'block' },
+  dateInput:{ width:'100%', padding:'10px 12px', background:'var(--bg)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-sm)', color:'var(--text-1)', fontSize:13, fontFamily:'var(--font)' },
   carGrid:{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:7 },
   carBtn:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4, padding:'10px 6px', borderRadius:9, cursor:'pointer', transition:'all 0.15s', minHeight:60 },
 }
