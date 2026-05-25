@@ -40,6 +40,7 @@ const distToPolyline = (lat, lng, pts) => {
   return min
 }
 
+// Rota simples ponto a ponto
 const fetchRoute = async (from, to) => {
   const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`
   try {
@@ -48,6 +49,30 @@ const fetchRoute = async (from, to) => {
     const route = d.routes?.[0]
     if (!route) return null
     return { points: route.geometry.coordinates.map(([lng,lat]) => [lat,lng]), distance: route.distance, duration: route.duration }
+  } catch { return null }
+}
+
+// Rota otimizada multi-parada via OSRM trip (considera distâncias e mãos de direção)
+const fetchOptimizedTrip = async (waypoints) => {
+  // waypoints: [{lat, lng}, ...]  — primeiro é a origem (GPS)
+  const coords = waypoints.map(p => `${p.lng},${p.lat}`).join(';')
+  const url = `https://router.project-osrm.org/trip/v1/driving/${coords}?roundtrip=false&source=first&destination=last&overview=full&geometries=geojson&steps=false`
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(12000) })
+    const d = await r.json()
+    if (d.code !== 'Ok' || !d.trips?.[0]) return null
+    // OSRM retorna a ordem ótima em d.waypoints[].waypoint_index (destinos reordenados)
+    // O índice 0 é sempre a origem (source=first), ignoramos
+    const optimizedOrder = d.waypoints
+      .slice(1)  // remove a origem
+      .sort((a, b) => a.trips_index !== undefined ? a.waypoint_index - b.waypoint_index : 0)
+      .map(w => w.waypoint_index - 1)  // -1 porque removemos a origem
+
+    return {
+      order:    optimizedOrder,
+      distance: d.trips[0].distance,
+      duration: d.trips[0].duration,
+    }
   } catch { return null }
 }
 
@@ -97,6 +122,7 @@ export default function MapView() {
   const routeLines      = useRef([])
   const stopMkrs        = useRef([])
   const routePolylines  = useRef([])   // pts da rota por realIdx (p/ detecção desvio)
+  const masterLine      = useRef(null)  // linha mestra do trajeto completo
   const originRef       = useRef(null)
   const builtWithGPS    = useRef(false)
   const builtWithFallback = useRef(false)
@@ -163,13 +189,14 @@ export default function MapView() {
     return () => { navigator.geolocation.clearWatch(wid); clearTimeout(t) }
   }, [])
 
-  // ── buildRoutes (imperativo, não depende de estado) ────────────────────────
-  const buildRoutes = useCallback((pos, currentSeqOrder, currentPedidos, currentActiveIdx) => {
+  // ── buildRoutes com otimização OSRM trip + todas as rotas visíveis ──────────
+  const buildRoutes = useCallback(async (pos, currentSeqOrder, currentPedidos, currentActiveIdx, forceOrder = false) => {
     if (!mapInst.current || currentPedidos.length === 0) return
 
     // Limpa camadas anteriores
     routeLines.current.forEach(l => l?.remove())
     stopMkrs.current.forEach(m => m?.remove())
+    masterLine.current?.remove()
     routeLines.current    = new Array(currentPedidos.length).fill(null)
     stopMkrs.current      = new Array(currentPedidos.length).fill(null)
     routePolylines.current = new Array(currentPedidos.length).fill(null)
@@ -180,9 +207,31 @@ export default function MapView() {
     }
     originRef.current = from
 
-    const ordered = currentSeqOrder.map(i => currentPedidos[i]).filter(Boolean)
+    let optimizedSeqOrder = currentSeqOrder
 
-    // Cria marcadores imediatamente
+    // ── Otimização da ordem via OSRM trip (apenas na primeira construção) ───
+    if (!forceOrder && currentPedidos.length > 1) {
+      setLoadingIdx(['otimizando'])
+      const waypoints = [
+        from,
+        ...currentSeqOrder.map(i => ({
+          lat: currentPedidos[i]?.lat || -3.7317,
+          lng: currentPedidos[i]?.lng || -38.5267,
+        }))
+      ]
+      const trip = await fetchOptimizedTrip(waypoints)
+      if (trip?.order?.length === currentSeqOrder.length) {
+        // Reordena seqOrder de acordo com a ordem ótima do OSRM
+        optimizedSeqOrder = trip.order.map(i => currentSeqOrder[i])
+        // Atualiza o state de ordem no componente
+        setSeqOrder(optimizedSeqOrder)
+        speak(`Rota otimizada. ${currentPedidos.length} paradas na melhor sequência.`)
+      }
+    }
+
+    const ordered = optimizedSeqOrder.map(i => currentPedidos[i]).filter(Boolean)
+
+    // ── Marcadores numerados na ordem otimizada ────────────────────────────
     ordered.forEach((ped, seqIdx) => {
       const ri  = currentPedidos.indexOf(ped)
       const col = COLORS[seqIdx % COLORS.length]
@@ -192,39 +241,48 @@ export default function MapView() {
       stopMkrs.current[ri] = mkr
     })
 
-    // Ajusta bounds
+    // Bounds
     const allPts = [
       [from.lat, from.lng],
       ...currentPedidos.map(o => [o.lat || -3.7317, o.lng || -38.5267]),
     ]
     mapInst.current.fitBounds(L.latLngBounds(allPts), { padding: [60, 60] })
 
-    // Calcula rotas em paralelo
-    const newRD = new Array(currentPedidos.length).fill(null)
+    // ── Calcula rota de cada parada em paralelo (todas visíveis) ──────────
     setLoadingIdx(currentPedidos.map((_, i) => i))
+    const allRoutePoints = []  // acumula pontos para linha mestra
 
-    ordered.forEach(async (ped, seqIdx) => {
-      const ri  = currentPedidos.indexOf(ped)
-      const res = await fetchRoute(from, { lat: ped.lat || -3.7317, lng: ped.lng || -38.5267 })
+    const results = await Promise.all(
+      ordered.map(ped =>
+        fetchRoute(from, { lat: ped.lat || -3.7317, lng: ped.lng || -38.5267 })
+      )
+    )
+
+    results.forEach((res, seqIdx) => {
       if (!res || !mapInst.current) return
+      const ped  = ordered[seqIdx]
+      const ri   = currentPedidos.indexOf(ped)
       const col  = COLORS[seqIdx % COLORS.length]
       const isAct = seqIdx === currentActiveIdx
+
+      // Linha individual por parada — todas visíveis simultaneamente
       const line = L.polyline(res.points, {
-        color: col, weight: isAct ? 6 : 3,
-        opacity: isAct ? 0.95 : 0.45,
-        dashArray: isAct ? null : '8,6',
+        color:     col,
+        weight:    isAct ? 6 : 4,
+        opacity:   isAct ? 1 : 0.6,
+        dashArray: isAct ? null : null,  // todas sólidas
       }).addTo(mapInst.current)
-      routeLines.current[ri]    = line
+      routeLines.current[ri]     = line
       routePolylines.current[ri] = res.points
-      newRD[ri] = { distance: res.distance, duration: res.duration }
+      allRoutePoints.push(...res.points)
+
       setRouteData(prev => {
-        const next = [...prev]
-        next[ri] = newRD[ri]
-        return next
+        const next = [...prev]; next[ri] = { distance: res.distance, duration: res.duration }; return next
       })
-      setLoadingIdx(prev => prev.filter(x => x !== ri))
     })
-  }, []) // sem dependências de estado — recebe tudo por parâmetro
+
+    setLoadingIdx([])
+  }, []) // recebe tudo por parâmetro
 
   // ── Trigger: constrói rotas quando mapa + GPS estão prontos ───────────────
   useEffect(() => {
@@ -342,7 +400,7 @@ export default function MapView() {
       const pos = gpsPos || originRef.current
       builtWithGPS.current = !!gpsPos
       builtWithFallback.current = true
-      buildRoutes(pos, next, pedidos, 0)
+      buildRoutes(pos, next, pedidos, 0, true)  // forceOrder: não reotimiza
     }, 100)
   }
 
