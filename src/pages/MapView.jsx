@@ -136,6 +136,7 @@ export default function MapView() {
   const stopMkrs        = useRef([])
   const routePolylines  = useRef([])   // pts da rota por realIdx (p/ detecção desvio)
   const masterLine      = useRef(null)  // linha mestra do trajeto completo
+  const buildRoutesRef  = useRef(null)  // ref estável para buildRoutes
   const originRef       = useRef(null)
   const builtWithGPS    = useRef(false)
   const builtWithFallback = useRef(false)
@@ -308,6 +309,8 @@ export default function MapView() {
 
     setLoadingIdx([])
   }, []) // recebe tudo por parâmetro
+  // Guarda ref estável
+  useEffect(() => { buildRoutesRef.current = buildRoutes }, [buildRoutes])
 
   // ── Trigger: constrói rotas quando mapa + GPS estão prontos ───────────────
   useEffect(() => {
@@ -315,16 +318,16 @@ export default function MapView() {
     if (gpsPos && !builtWithGPS.current) {
       builtWithGPS.current     = true
       builtWithFallback.current = true
-      buildRoutes(gpsPos, seqOrder, pedidos, activeIdx)
+      buildRoutesRef.current?.(gpsPos, seqOrder, pedidos, activeIdx)
     } else if (!gpsPos && !builtWithFallback.current) {
       builtWithFallback.current = true
-      buildRoutes(null, seqOrder, pedidos, activeIdx)
+      buildRoutesRef.current?.(null, seqOrder, pedidos, activeIdx)
     } else if (gpsPos && builtWithFallback.current && !builtWithGPS.current) {
       // GPS chegou depois do fallback → reconstrói com posição real
       builtWithGPS.current = true
-      buildRoutes(gpsPos, seqOrder, pedidos, activeIdx)
+      buildRoutesRef.current?.(gpsPos, seqOrder, pedidos, activeIdx)
     }
-  }, [mapReady, pedidos, gpsReady, gpsPos, buildRoutes]) // eslint-disable-line
+  }, [mapReady, pedidos, gpsReady, gpsPos]) // eslint-disable-line
 
   // ── Atualiza marcador GPS + pan + detecção de desvio ──────────────────────
   useEffect(() => {
@@ -365,10 +368,11 @@ export default function MapView() {
       setTimeout(() => {
         builtWithGPS.current = true
         builtWithFallback.current = true
-        buildRoutes(gpsPos, seqOrder, pedidos, activeIdx)
+        buildRoutesRef.current?.(gpsPos, seqOrder, pedidos, activeIdx)
       }, 400)
     }
   }, [gpsPos, mapReady]) // eslint-disable-line
+
 
   // ── selectStop ────────────────────────────────────────────────────────────
   const selectStop = useCallback((seqIdx) => {
@@ -425,7 +429,7 @@ export default function MapView() {
       const pos = gpsPos || originRef.current
       builtWithGPS.current = !!gpsPos
       builtWithFallback.current = true
-      buildRoutes(pos, next, pedidos, 0, true)  // forceOrder: não reotimiza
+      buildRoutesRef.current?.(pos, next, pedidos, 0, true)  // forceOrder
     }, 100)
   }
 
