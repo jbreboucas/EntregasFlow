@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Download, Share2, Loader } from 'lucide-react'
+import { Download, Share2, Loader, MessageSquare, Copy, Check } from 'lucide-react'
 
 // Gera o recibo como PNG via Canvas API
 const generateReceiptCanvas = async ({ order, recebidoPor, fotoBase64, courierName }) => {
@@ -219,6 +219,50 @@ export default function ReceiptGenerator({ order, recebidoPor, fotoBase64, couri
   const [loading, setLoading] = useState(false)
   const [preview, setPreview] = useState(null)
   const [shared,  setShared]  = useState(false)
+  const [copied,  setCopied]  = useState(false)
+
+  const mensagem = [
+    `✅ *Entrega Confirmada!*`,
+    ``,
+    `📦 *Pedido:* #${order.id}`,
+    `👤 *Cliente:* ${order.cliente_nome || 'Não informado'}`,
+    `📍 *Endereço:* ${order.endereco || ''}`,
+    order.cliente_telefone ? `📞 *Telefone:* ${order.cliente_telefone}` : null,
+    ``,
+    `✍️ *Recebido por:* ${recebidoPor}`,
+    `🚴 *Entregador:* ${courierName || '—'}`,
+    `🕐 *Horário:* ${new Date().toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}`,
+    ``,
+    `_BRLAB.ENTREGAS_`,
+  ].filter(l => l !== null).join('\n')
+
+  const handleCopyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(mensagem)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch {
+      // fallback
+      const ta = document.createElement('textarea')
+      ta.value = mensagem
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    }
+  }
+
+  const handleShareMessage = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `Recibo #${order.id}`, text: mensagem })
+      } catch {}
+    } else {
+      handleCopyMessage()
+    }
+  }
 
   const generate = async () => {
     setLoading(true)
@@ -277,6 +321,32 @@ export default function ReceiptGenerator({ order, recebidoPor, fotoBase64, couri
         </div>
       )}
 
+      {/* ── Mensagem de texto ─────────────────────────────────── */}
+      <div style={s.msgSection}>
+        <div style={s.msgLabel}>
+          <MessageSquare size={13} color="var(--accent)" />
+          Mensagem para WhatsApp
+        </div>
+        <div style={s.msgBox}>
+          <pre style={s.msgText}>{mensagem}</pre>
+        </div>
+        <div style={s.msgBtns}>
+          <button style={{ ...s.msgBtn, ...(copied ? s.msgBtnCopied : {}) }} onClick={handleCopyMessage}>
+            {copied ? <><Check size={13} /> Copiado!</> : <><Copy size={13} /> Copiar texto</>}
+          </button>
+          <button style={s.msgBtnShare} onClick={handleShareMessage}>
+            <Share2 size={13} /> Compartilhar texto
+          </button>
+        </div>
+      </div>
+
+      <div style={s.divider} />
+
+      {/* ── Recibo PNG ─────────────────────────────────────────── */}
+      <div style={s.imgLabel}>
+        <span style={{ fontSize:14 }}>🖼️</span> Recibo com foto (PNG)
+      </div>
+
       {/* Botões */}
       <div style={s.btns}>
         <button style={s.downloadBtn} onClick={handleDownload} disabled={loading}>
@@ -313,5 +383,15 @@ const s = {
   downloadBtn:{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'12px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, cursor:'pointer' },
   shareBtn:   { flex:2, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'12px', borderRadius:10, color:'#080D1A', fontSize:14, fontWeight:800, cursor:'pointer', transition:'background 0.3s' },
   hint:       { display:'flex', alignItems:'flex-start', gap:10, background:'rgba(0,229,160,0.06)', border:'1px solid var(--accent-border)', borderRadius:10, padding:'10px 12px' },
+  divider:    { height:1, background:'var(--border)', margin:'4px 0' },
+  imgLabel:   { display:'flex', alignItems:'center', gap:7, fontSize:12, fontWeight:700, color:'var(--text-2)', marginBottom:6 },
+  msgSection: { background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' },
+  msgLabel:   { display:'flex', alignItems:'center', gap:7, fontSize:12, fontWeight:700, color:'var(--accent)', padding:'10px 14px', borderBottom:'1px solid var(--border)' },
+  msgBox:     { padding:'12px 14px', background:'var(--bg)' },
+  msgText:    { margin:0, fontSize:13, color:'var(--text-2)', lineHeight:1.7, whiteSpace:'pre-wrap', fontFamily:'var(--font)', wordBreak:'break-word' },
+  msgBtns:    { display:'flex', gap:8, padding:'10px 14px', borderTop:'1px solid var(--border)' },
+  msgBtn:     { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:6, padding:'9px', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-2)', fontSize:12, fontWeight:600, cursor:'pointer', transition:'all 0.2s' },
+  msgBtnCopied:{ background:'var(--delivered-bg)', borderColor:'rgba(52,211,153,0.3)', color:'var(--delivered)' },
+  msgBtnShare:{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:6, padding:'9px', background:'var(--accent)', borderRadius:8, color:'#080D1A', fontSize:12, fontWeight:700, cursor:'pointer' },
   hintText:   { fontSize:12, color:'var(--text-2)', lineHeight:1.5 },
 }
