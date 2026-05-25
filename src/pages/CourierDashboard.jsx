@@ -109,7 +109,7 @@ export default function CourierDashboard() {
     if (ids) navigate(`/map/multi/${ids}`)
   }
 
-  const shown = tab === 'available' ? available : myOrders
+  const shown = tab === 'available' ? available : tab === 'mine' ? myActive : myDone
   const selectedOrder = selectedId ? orders.find(o => o.id === selectedId) : null
 
   return (
@@ -158,8 +158,9 @@ export default function CourierDashboard() {
       {/* Toolbar */}
       <div style={s.toolbar}>
         <div style={s.tabs}>
-          <Tab active={tab==='available'} onClick={() => setTab('available')} label="Disponíveis"  count={available.length} countColor="var(--pending)" />
-          <Tab active={tab==='mine'}      onClick={() => setTab('mine')}      label="Meus pedidos" count={myOrders.length}   countColor="var(--in-route)" />
+          <Tab active={tab==='available'} onClick={() => setTab('available')} label="Disponíveis" count={available.length}  countColor="var(--pending)" />
+          <Tab active={tab==='mine'}      onClick={() => setTab('mine')}      label="Em rota"     count={myActive.length}   countColor="var(--in-route)" />
+          <Tab active={tab==='done'}      onClick={() => setTab('done')}      label="Entregues"   count={myDone.length}     countColor="var(--delivered)" />
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button style={s.refreshBtn} onClick={handleRefresh} title="Atualizar pedidos" disabled={refreshing}>
@@ -176,12 +177,13 @@ export default function CourierDashboard() {
         {shown.length === 0
           ? <div style={s.empty} className="fade-in">
               <Package size={40} color="var(--text-3)" />
-              <p style={s.emptyTitle}>{tab === 'available' ? 'Nenhum pedido disponível' : 'Nenhum pedido atribuído'}</p>
-              <p style={s.emptySub}>{tab === 'available' ? 'Novos pedidos aparecem aqui em tempo real.' : 'Crie um pedido ou assuma um disponível.'}</p>
+              <p style={s.emptyTitle}>{tab === 'available' ? 'Nenhum pedido disponível' : tab === 'mine' ? 'Nenhum pedido em rota' : 'Nenhuma entrega concluída'}</p>
+              <p style={s.emptySub}>{tab === 'available' ? 'Novos pedidos aparecem aqui em tempo real.' : tab === 'mine' ? 'Assuma um pedido disponível ou crie um novo.' : 'As entregas finalizadas aparecerão aqui.'}</p>
             </div>
           : shown.map((order, i) => (
             <CourierCard key={order.id} order={order} delay={i*0.04}
               isAvailable={tab === 'available'}
+              isDone={tab === 'done'}
               onAssociate={() => associate(order.id)}
               onNavigate={() => navigate(`/map/single/${order.id}`)}
               onConfirm={() => navigate(`/confirm/${order.id}`)}
