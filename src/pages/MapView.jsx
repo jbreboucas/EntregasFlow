@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useOrders } from '../App'
 import { getPedidos } from '../lib/supabase'
@@ -19,6 +19,27 @@ const COLORS = ['#00E5A0','#60A5FA','#F59E0B','#F87171','#A78BFA','#FB923C']
 const fmtDist = (m) => m >= 1000 ? `${(m/1000).toFixed(1)} km` : `${Math.round(m)} m`
 const fmtTime = (s) => { const m = Math.round(s/60); return m >= 60 ? `${Math.floor(m/60)}h ${m%60}min` : `${m} min` }
 
+// ─── Haversine distance (metros) ──────────────────────────────────────────────
+const haversine = (lat1, lng1, lat2, lng2) => {
+  const R = 6371000, r = Math.PI / 180
+  const dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*r) * Math.cos(lat2*r) * Math.sin(dLng/2)**2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+}
+
+// Distância mínima de um ponto a uma polyline
+const distToPolyline = (lat, lng, pts) => {
+  let min = Infinity
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [aLat, aLng] = pts[i], [bLat, bLng] = pts[i+1]
+    const dx = bLat-aLat, dy = bLng-aLng
+    const t  = Math.max(0, Math.min(1, ((lat-aLat)*dx + (lng-aLng)*dy) / (dx*dx + dy*dy + 1e-12)))
+    const d  = haversine(lat, lng, aLat + t*dx, aLng + t*dy)
+    if (d < min) min = d
+  }
+  return min
+}
+
 const fetchRoute = async (from, to) => {
   const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`
   try {
@@ -35,245 +56,267 @@ const speak = (text) => {
   window.speechSynthesis.cancel()
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'pt-BR'; u.rate = 1.0
-  const ptVoice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('pt'))
-  if (ptVoice) u.voice = ptVoice
+  const v = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('pt'))
+  if (v) u.voice = v
   window.speechSynthesis.speak(u)
 }
 
-const ROUTE_IDLE = 'idle', ROUTE_ACTIVE = 'active', ROUTE_PAUSED = 'paused'
-
 function makeStopIcon(num, color, active) {
-  const size = active ? 40 : 32
+  const sz = active ? 40 : 32
   return L.divIcon({
-    html: `<div style="width:${size}px;height:${size}px;background:${color};border:${active?3:2}px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:${active?`0 0 0 4px ${color}44,0 4px 14px rgba(0,0,0,0.45)`:'0 2px 6px rgba(0,0,0,0.3)'};font-family:Outfit,sans-serif;font-weight:900;font-size:${active?14:12}px;color:#080D1A;cursor:pointer;">${num}</div>`,
-    iconSize:[size,size], iconAnchor:[size/2,size/2], className:'',
+    html: `<div style="width:${sz}px;height:${sz}px;background:${color};border:${active?3:2}px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:${active?`0 0 0 4px ${color}44,0 4px 14px rgba(0,0,0,0.45)`:'0 2px 6px rgba(0,0,0,0.3)'};font-family:Outfit,sans-serif;font-weight:900;font-size:${active?14:12}px;color:#080D1A;cursor:pointer;">${num}</div>`,
+    iconSize:[sz,sz], iconAnchor:[sz/2,sz/2], className:'',
   })
 }
 
+const IDLE = 'idle', ACTIVE = 'active', PAUSED = 'paused'
+
 export default function MapView() {
-  const { mode, ids } = useParams()
+  const { ids } = useParams()
   const navigate = useNavigate()
   const { orders, setOrders } = useOrders()
 
+  // ── State ──────────────────────────────────────────────────────────────────
   const [pedidos,     setPedidos]     = useState([])
-  const [order,       setOrder]       = useState([])
+  const [seqOrder,    setSeqOrder]    = useState([])   // índices de pedidos[] na ordem de entrega
   const [activeIdx,   setActiveIdx]   = useState(0)
   const [gpsPos,      setGpsPos]      = useState(null)
-  const [gpsReady,    setGpsReady]    = useState(false)
-  const [routeData,   setRouteData]   = useState([])
+  const [routeState,  setRouteState]  = useState(IDLE)
+  const [routeData,   setRouteData]   = useState([])   // [{distance, duration}] por realIdx
   const [loadingIdx,  setLoadingIdx]  = useState([])
-  const [routeState,  setRouteState]  = useState(ROUTE_IDLE)
-  const [showReorder,  setShowReorder]  = useState(false)
-  const [dragOver,     setDragOver]     = useState(null)
-  const [mapReady,     setMapReady]     = useState(false)
-  const [showNavApps,  setShowNavApps]  = useState(false)
+  const [mapReady,    setMapReady]    = useState(false)
+  const [gpsReady,    setGpsReady]    = useState(false)
+  const [showReorder, setShowReorder] = useState(false)
+  const [showNavApps, setShowNavApps] = useState(false)
+  const [dragOver,    setDragOver]    = useState(null)
 
-  const mapRef     = useRef(null)
-  const mapInst    = useRef(null)
-  const myMkr      = useRef(null)
-  const routeLines = useRef([])
-  const stopMkrs   = useRef([])
-  const origin     = useRef(null)
-  const routeBuiltFallback = useRef(false)
-  const routeBuiltGPS     = useRef(false)
-  const dragSrc       = useRef(null)
-  const listRef       = useRef(null)
-  const routePolylines = useRef([])   // coords das rotas [[lat,lng], ...] por pedido
-  const lastRecalcTime = useRef(0)    // timestamp do último recálculo
-  const prevGpsPos     = useRef(null) // última posição GPS processada
+  // ── Refs ───────────────────────────────────────────────────────────────────
+  const mapRef          = useRef(null)
+  const mapInst         = useRef(null)
+  const myMkr           = useRef(null)
+  const routeLines      = useRef([])
+  const stopMkrs        = useRef([])
+  const routePolylines  = useRef([])   // pts da rota por realIdx (p/ detecção desvio)
+  const originRef       = useRef(null)
+  const builtWithGPS    = useRef(false)
+  const builtWithFallback = useRef(false)
+  const lastRecalc      = useRef(0)
+  const routeStateRef   = useRef(IDLE) // espelho síncrono de routeState para callbacks
+  const dragSrc         = useRef(null)
+  const listRef         = useRef(null)
 
-  const orderedPedidos = order.map(i => pedidos[i]).filter(Boolean)
+  // Mantém routeStateRef sincronizado
+  useEffect(() => { routeStateRef.current = routeState }, [routeState])
 
-  // ── Resolve pedidos ──────────────────────────────────────────────────────────
+  // Pedidos ordenados conforme seqOrder
+  const orderedPedidos = useMemo(
+    () => seqOrder.map(i => pedidos[i]).filter(Boolean),
+    [seqOrder, pedidos]
+  )
+  const currentOrder = orderedPedidos[activeIdx]
+
+  // ── Resolve pedidos ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ids) return
     const idList = ids.split(',').filter(Boolean)
     const resolve = (all) => {
       const found = idList.map(id => all.find(o => o.id === id)).filter(Boolean)
-      setPedidos(found); setOrder(found.map((_,i) => i))
+      setPedidos(found)
+      setSeqOrder(found.map((_, i) => i))
     }
     const fromCtx = idList.map(id => orders.find(o => o.id === id)).filter(Boolean)
     if (fromCtx.length === idList.length) resolve(orders)
     else getPedidos().then(({ data }) => { if (data) { setOrders(data); resolve(data) } })
-  }, [ids])
+  }, [ids]) // eslint-disable-line
 
-  // ── Mapa ─────────────────────────────────────────────────────────────────────
+  // ── Mapa ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (mapInst.current || !mapRef.current || pedidos.length === 0) return
-    const map = L.map(mapRef.current, { center:[pedidos[0].lat||-3.7317, pedidos[0].lng||-38.5267], zoom:13, zoomControl:false })
+    const center = [pedidos[0].lat || -3.7317, pedidos[0].lng || -38.5267]
+    const map = L.map(mapRef.current, { center, zoom: 14, zoomControl: false })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map)
-    L.control.zoom({ position:'bottomright' }).addTo(map)
+    L.control.zoom({ position: 'bottomright' }).addTo(map)
     mapInst.current = map
     setMapReady(true)
-    return () => { map.remove(); mapInst.current = null; routeBuiltFallback.current = false; routeBuiltGPS.current = false; setMapReady(false) }
+    return () => {
+      map.remove()
+      mapInst.current = null
+      myMkr.current   = null
+      setMapReady(false)
+      builtWithGPS.current     = false
+      builtWithFallback.current = false
+    }
   }, [pedidos])
 
-  // ── GPS ───────────────────────────────────────────────────────────────────────
+  // ── GPS ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!navigator.geolocation) { setGpsReady(true); return }
     const wid = navigator.geolocation.watchPosition(
-      pos => { setGpsPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsReady(true) },
+      pos => {
+        setGpsPos({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        setGpsReady(true)
+      },
       () => setGpsReady(true),
-      { enableHighAccuracy:true, maximumAge:5000, timeout:10000 }
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
     )
-    const t = setTimeout(() => setGpsReady(true), 4000)
+    const t = setTimeout(() => setGpsReady(true), 5000)
     return () => { navigator.geolocation.clearWatch(wid); clearTimeout(t) }
   }, [])
 
-  // ── Marcador GPS + detecção de desvio ────────────────────────────────────────
+  // ── buildRoutes (imperativo, não depende de estado) ────────────────────────
+  const buildRoutes = useCallback((pos, currentSeqOrder, currentPedidos, currentActiveIdx) => {
+    if (!mapInst.current || currentPedidos.length === 0) return
+
+    // Limpa camadas anteriores
+    routeLines.current.forEach(l => l?.remove())
+    stopMkrs.current.forEach(m => m?.remove())
+    routeLines.current    = new Array(currentPedidos.length).fill(null)
+    stopMkrs.current      = new Array(currentPedidos.length).fill(null)
+    routePolylines.current = new Array(currentPedidos.length).fill(null)
+
+    const from = pos || {
+      lat: (currentPedidos[0].lat || -3.7317) - 0.012,
+      lng: (currentPedidos[0].lng || -38.5267) + 0.009,
+    }
+    originRef.current = from
+
+    const ordered = currentSeqOrder.map(i => currentPedidos[i]).filter(Boolean)
+
+    // Cria marcadores imediatamente
+    ordered.forEach((ped, seqIdx) => {
+      const ri  = currentPedidos.indexOf(ped)
+      const col = COLORS[seqIdx % COLORS.length]
+      const mkr = L.marker([ped.lat || -3.7317, ped.lng || -38.5267], {
+        icon: makeStopIcon(seqIdx + 1, col, seqIdx === currentActiveIdx),
+      }).addTo(mapInst.current).on('click', () => setActiveIdx(seqIdx))
+      stopMkrs.current[ri] = mkr
+    })
+
+    // Ajusta bounds
+    const allPts = [
+      [from.lat, from.lng],
+      ...currentPedidos.map(o => [o.lat || -3.7317, o.lng || -38.5267]),
+    ]
+    mapInst.current.fitBounds(L.latLngBounds(allPts), { padding: [60, 60] })
+
+    // Calcula rotas em paralelo
+    const newRD = new Array(currentPedidos.length).fill(null)
+    setLoadingIdx(currentPedidos.map((_, i) => i))
+
+    ordered.forEach(async (ped, seqIdx) => {
+      const ri  = currentPedidos.indexOf(ped)
+      const res = await fetchRoute(from, { lat: ped.lat || -3.7317, lng: ped.lng || -38.5267 })
+      if (!res || !mapInst.current) return
+      const col  = COLORS[seqIdx % COLORS.length]
+      const isAct = seqIdx === currentActiveIdx
+      const line = L.polyline(res.points, {
+        color: col, weight: isAct ? 6 : 3,
+        opacity: isAct ? 0.95 : 0.45,
+        dashArray: isAct ? null : '8,6',
+      }).addTo(mapInst.current)
+      routeLines.current[ri]    = line
+      routePolylines.current[ri] = res.points
+      newRD[ri] = { distance: res.distance, duration: res.duration }
+      setRouteData(prev => {
+        const next = [...prev]
+        next[ri] = newRD[ri]
+        return next
+      })
+      setLoadingIdx(prev => prev.filter(x => x !== ri))
+    })
+  }, []) // sem dependências de estado — recebe tudo por parâmetro
+
+  // ── Trigger: constrói rotas quando mapa + GPS estão prontos ───────────────
   useEffect(() => {
-    if (!mapInst.current || !gpsPos) return
+    if (!mapReady || pedidos.length === 0 || !gpsReady) return
+    if (gpsPos && !builtWithGPS.current) {
+      builtWithGPS.current     = true
+      builtWithFallback.current = true
+      buildRoutes(gpsPos, seqOrder, pedidos, activeIdx)
+    } else if (!gpsPos && !builtWithFallback.current) {
+      builtWithFallback.current = true
+      buildRoutes(null, seqOrder, pedidos, activeIdx)
+    } else if (gpsPos && builtWithFallback.current && !builtWithGPS.current) {
+      // GPS chegou depois do fallback → reconstrói com posição real
+      builtWithGPS.current = true
+      buildRoutes(gpsPos, seqOrder, pedidos, activeIdx)
+    }
+  }, [mapReady, pedidos, gpsReady, gpsPos, buildRoutes]) // eslint-disable-line
+
+  // ── Atualiza marcador GPS + pan + detecção de desvio ──────────────────────
+  useEffect(() => {
+    if (!mapReady || !gpsPos || !mapInst.current) return
     const { lat, lng } = gpsPos
 
-    // Atualiza ou cria marcador do entregador
+    // Cria ou move marcador
     if (myMkr.current) {
       myMkr.current.setLatLng([lat, lng])
     } else {
       myMkr.current = L.marker([lat, lng], {
         icon: L.divIcon({
-          html: `<div style="
-            width:22px;height:22px;
-            background:#60A5FA;border:3px solid #fff;border-radius:50%;
-            box-shadow:0 0 0 6px rgba(96,165,250,0.2);
-            transition:all 0.5s ease;">
-          </div>`,
-          iconSize:[22,22], iconAnchor:[11,11], className:'',
-        }), zIndexOffset:2000
+          html: `<div style="width:22px;height:22px;background:#60A5FA;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(96,165,250,0.2);"></div>`,
+          iconSize: [22, 22], iconAnchor: [11, 11], className: '',
+        }), zIndexOffset: 2000,
       }).addTo(mapInst.current)
     }
 
-    // Centraliza suavemente quando rota está ativa
-    if (routeState === ROUTE_ACTIVE) {
+    // Pan suave com rota ativa
+    if (routeStateRef.current === ACTIVE) {
       mapInst.current.panTo([lat, lng], { animate: true, duration: 0.8 })
     }
 
-    // ── Detecção de desvio ────────────────────────────────────────────────────
-    if (routeState !== ROUTE_ACTIVE) return          // só verifica com rota ativa
-    if (!routeBuiltGPS.current) return               // aguarda rota GPS estar pronta
+    // Detecção de desvio (apenas com rota ativa e GPS já construído)
+    if (routeStateRef.current !== ACTIVE) return
+    if (!builtWithGPS.current) return
+    if (Date.now() - lastRecalc.current < 15000) return
 
-    const now = Date.now()
-    if (now - lastRecalcTime.current < 15000) return  // no máximo 1 recálculo a cada 15s
-
-    // Pega a rota da parada atual
-    const currentPed   = orderedPedidos[activeIdx]
-    if (!currentPed) return
-    const currentRealIdx = pedidos.indexOf(currentPed)
-    const routePts       = routePolylines.current[currentRealIdx]
-    if (!routePts || routePts.length === 0) return
-
-    // Calcula distância mínima do ponto GPS até qualquer ponto da rota
-    const R     = 6371000  // raio da Terra em metros
-    const toRad = (d) => d * Math.PI / 180
-    let minDist = Infinity
-
-    for (let i = 0; i < routePts.length - 1; i++) {
-      const [aLat, aLng] = routePts[i]
-      const [bLat, bLng] = routePts[i + 1]
-
-      // Distância simples ponto → segmento de reta (projeção)
-      const dLat = bLat - aLat, dLng = bLng - aLng
-      const t    = Math.max(0, Math.min(1,
-        ((lat - aLat) * dLat + (lng - aLng) * dLng) / (dLat * dLat + dLng * dLng + 1e-10)
-      ))
-      const pLat = aLat + t * dLat, pLng = aLng + t * dLng
-
-      // Distância haversine do GPS até a projeção
-      const dφ   = toRad(lat - pLat), dλ = toRad(lng - pLng)
-      const a    = Math.sin(dφ/2)**2 + Math.cos(toRad(lat)) * Math.cos(toRad(pLat)) * Math.sin(dλ/2)**2
-      const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-
-      if (dist < minDist) minDist = dist
-    }
-
-    // Se desviou mais de 80 metros → recalcula
-    if (minDist > 80) {
-      lastRecalcTime.current = now
-      routeBuiltGPS.current  = false
-      routeBuiltFallback.current = false
+    const pts = routePolylines.current.find(p => p && p.length > 0)
+    if (!pts) return
+    const dist = distToPolyline(lat, lng, pts)
+    if (dist > 80) {
+      lastRecalc.current = Date.now()
       speak('Recalculando rota.')
+      builtWithGPS.current = false
+      builtWithFallback.current = false
+      // Aguarda state para reconstruir corretamente
       setTimeout(() => {
-        routeBuiltGPS.current = true
-        buildRoutes(gpsPos)
-      }, 300)
+        builtWithGPS.current = true
+        builtWithFallback.current = true
+        buildRoutes(gpsPos, seqOrder, pedidos, activeIdx)
+      }, 400)
     }
-  }, [gpsPos, routeState, activeIdx, orderedPedidos, pedidos, buildRoutes])
+  }, [gpsPos, mapReady]) // eslint-disable-line
 
-  // ── Build rotas ───────────────────────────────────────────────────────────────
-  const buildRoutes = useCallback(async (pos) => {
-    if (!mapInst.current || pedidos.length === 0) return
-    routeLines.current.forEach(l => l?.remove()); stopMkrs.current.forEach(m => m?.remove())
-    routeLines.current  = new Array(pedidos.length).fill(null)
-    stopMkrs.current    = new Array(pedidos.length).fill(null)
-    routePolylines.current = new Array(pedidos.length).fill(null)
-    const from = pos || { lat:(pedidos[0].lat||-3.7317)-0.01, lng:(pedidos[0].lng||-38.5267)+0.008 }
-    origin.current = from
-    const ordered = order.map(i => pedidos[i]).filter(Boolean)
-    ordered.forEach((ped, seqIdx) => {
-      const ri  = pedidos.indexOf(ped)
-      const col = COLORS[seqIdx%COLORS.length]
-      const mkr = L.marker([ped.lat||-3.7317, ped.lng||-38.5267], { icon: makeStopIcon(seqIdx+1, col, seqIdx===activeIdx) })
-        .addTo(mapInst.current).on('click', () => selectStop(seqIdx))
-      stopMkrs.current[ri] = mkr
-    })
-    const newRD = new Array(pedidos.length).fill(null)
-    setLoadingIdx(pedidos.map((_,i)=>i))
-    ordered.forEach(async (ped, seqIdx) => {
-      const ri  = pedidos.indexOf(ped)
-      const res = await fetchRoute(from, { lat:ped.lat||-3.7317, lng:ped.lng||-38.5267 })
-      if (res && mapInst.current) {
-        const col = COLORS[seqIdx%COLORS.length]
-        const line = L.polyline(res.points, { color:col, weight:seqIdx===activeIdx?6:3, opacity:seqIdx===activeIdx?0.95:0.45, dashArray:seqIdx===activeIdx?null:'8,6' }).addTo(mapInst.current)
-        routeLines.current[ri] = line
-        routePolylines.current[ri] = res.points  // salva para detecção de desvio
-        newRD[ri] = { distance:res.distance, duration:res.duration }
-        setRouteData([...newRD])
-      }
-      setLoadingIdx(prev => prev.filter(x => x !== ri))
-    })
-    const allPts = [[from.lat,from.lng], ...pedidos.map(o=>[o.lat||-3.7317,o.lng||-38.5267])]
-    mapInst.current.fitBounds(L.latLngBounds(allPts), { padding:[60,60] })
-  }, [pedidos, order, activeIdx])
-
-  useEffect(() => {
-    if (!mapReady || pedidos.length === 0) return
-    if (!gpsReady) return
-
-    if (gpsPos) {
-      // GPS real disponível — sempre reconstrói com posição real
-      if (routeBuiltGPS.current) return
-      routeBuiltGPS.current = true
-      routeBuiltFallback.current = true
-      buildRoutes(gpsPos)
-    } else {
-      // Sem GPS — usa fallback apenas uma vez
-      if (routeBuiltFallback.current) return
-      routeBuiltFallback.current = true
-      buildRoutes(null)
-    }
-  }, [mapReady, pedidos, gpsReady, gpsPos, buildRoutes])
-
-  const selectStop = (seqIdx) => {
+  // ── selectStop ────────────────────────────────────────────────────────────
+  const selectStop = useCallback((seqIdx) => {
     setActiveIdx(seqIdx)
-    const ordered = order.map(i=>pedidos[i]).filter(Boolean)
+    const ordered = seqOrder.map(i => pedidos[i]).filter(Boolean)
     const ped = ordered[seqIdx]
     if (!ped || !mapInst.current) return
-    ordered.forEach((p,i) => {
+    ordered.forEach((p, i) => {
       const ri = pedidos.indexOf(p)
-      routeLines.current[ri]?.setStyle({ weight:i===seqIdx?6:3, opacity:i===seqIdx?0.95:0.45, dashArray:i===seqIdx?null:'8,6' })
+      routeLines.current[ri]?.setStyle({ weight: i===seqIdx?6:3, opacity: i===seqIdx?0.95:0.45, dashArray: i===seqIdx?null:'8,6' })
       stopMkrs.current[ri]?.setIcon(makeStopIcon(i+1, COLORS[i%COLORS.length], i===seqIdx))
     })
-    mapInst.current.setView([ped.lat||-3.7317, ped.lng||-38.5267], 15, { animate:true })
-    if (routeState===ROUTE_ACTIVE) speak(`Parada ${seqIdx+1}: ${ped.cliente_nome||ped.endereco}`)
-  }
+    mapInst.current.setView([ped.lat||-3.7317, ped.lng||-38.5267], 15, { animate: true })
+    if (routeStateRef.current === ACTIVE) speak(`Parada ${seqIdx+1}: ${ped.cliente_nome||ped.endereco}`)
+  }, [seqOrder, pedidos])
 
-  const centerOnMe = () => { if (gpsPos && mapInst.current) mapInst.current.setView([gpsPos.lat,gpsPos.lng],16,{animate:true}) }
-
-  const openNavApp = (app) => {
+  // ── Controles de rota ─────────────────────────────────────────────────────
+  const startRoute = () => {
+    setRouteState(ACTIVE)
     const ped = orderedPedidos[activeIdx]
-    if (!ped) return
-    const lat = ped.lat || -3.7317
-    const lng = ped.lng || -38.5267
-    const addr = encodeURIComponent(ped.endereco || '')
+    speak(`Rota iniciada. ${orderedPedidos.length} entrega${orderedPedidos.length>1?'s':''} programada${orderedPedidos.length>1?'s':''}. Primeira parada: ${ped?.cliente_nome||ped?.endereco||'destino'}`)
+  }
+  const pauseRoute  = () => { setRouteState(PAUSED);  speak('Rota pausada.') }
+  const resumeRoute = () => { setRouteState(ACTIVE);  speak('Rota retomada.') }
+  const endRoute    = () => { setRouteState(IDLE);    speak('Rota finalizada. Bom trabalho!'); setTimeout(() => navigate('/courier'), 2500) }
+
+  // ── Navegação externa ─────────────────────────────────────────────────────
+  const openNavApp = (app) => {
+    if (!currentOrder) return
+    const lat = currentOrder.lat || -3.7317
+    const lng = currentOrder.lng || -38.5267
     const urls = {
       waze:   `waze://?ll=${lat},${lng}&navigate=yes&zoom=17`,
       gmaps:  `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
@@ -284,70 +327,49 @@ export default function MapView() {
     setShowNavApps(false)
   }
 
-  // ── Controles voz ─────────────────────────────────────────────────────────────
-  const startRoute = () => {
-    setRouteState(ROUTE_ACTIVE)
-    const ped = orderedPedidos[activeIdx]
-    speak(`Rota iniciada. ${orderedPedidos.length} entrega${orderedPedidos.length>1?'s':''} programada${orderedPedidos.length>1?'s':''}. Primeira parada: ${ped?.cliente_nome||ped?.endereco||'destino'}`)
+  // ── Reordenação ───────────────────────────────────────────────────────────
+  const applyReorder = (fromIdx, toIdx) => {
+    if (fromIdx === toIdx) return
+    const next = [...seqOrder]
+    const [m]  = next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, m)
+    setSeqOrder(next)
+    setActiveIdx(0)
+    builtWithGPS.current = false
+    builtWithFallback.current = false
+    speak(`Ordem atualizada. Parada 1: ${pedidos[next[0]]?.cliente_nome || pedidos[next[0]]?.endereco}`)
+    setTimeout(() => {
+      const pos = gpsPos || originRef.current
+      builtWithGPS.current = !!gpsPos
+      builtWithFallback.current = true
+      buildRoutes(pos, next, pedidos, 0)
+    }, 100)
   }
-  const pauseRoute  = () => { setRouteState(ROUTE_PAUSED);  speak('Rota pausada.') }
-  const resumeRoute = () => { setRouteState(ROUTE_ACTIVE);  speak('Rota retomada.') }
-  const endRoute    = () => { setRouteState(ROUTE_IDLE); speak('Rota finalizada. Bom trabalho!'); setTimeout(()=>navigate('/courier'),2500) }
 
-  // ── Drag reorder — MOUSE (desktop) ───────────────────────────────────────────
-  const onDragStart = (e, idx) => { dragSrc.current = idx; e.dataTransfer.effectAllowed='move' }
-  const onDragOver  = (e, idx) => { e.preventDefault(); setDragOver(idx) }
-  const onDrop      = (e, idx) => {
-    e.preventDefault(); setDragOver(null)
-    if (dragSrc.current === null || dragSrc.current === idx) { dragSrc.current=null; return }
-    applyReorder(dragSrc.current, idx)
-    dragSrc.current = null
-  }
+  // Mouse drag
+  const onDragStart = (e, i) => { dragSrc.current = i; e.dataTransfer.effectAllowed = 'move' }
+  const onDragOver  = (e, i) => { e.preventDefault(); setDragOver(i) }
+  const onDrop      = (e, i) => { e.preventDefault(); setDragOver(null); applyReorder(dragSrc.current, i); dragSrc.current = null }
 
-  // ── Touch reorder — MOBILE ────────────────────────────────────────────────────
-  const touchY     = useRef(0)
+  // Touch drag
   const touchSrcIdx = useRef(null)
-
-  const onTouchStart = (e, idx) => {
-    touchSrcIdx.current = idx
-    touchY.current = e.touches[0].clientY
-  }
-
-  const onTouchMove = (e) => {
-    e.preventDefault()  // impede scroll da página durante drag
-    if (touchSrcIdx.current === null || !listRef.current) return
+  const onTouchStart = (e, i) => { touchSrcIdx.current = i }
+  const onTouchMove  = (e) => {
+    e.preventDefault()
+    if (!listRef.current) return
     const y = e.touches[0].clientY
-    const items = listRef.current.querySelectorAll('[data-reorder-item]')
-    let targetIdx = null
-    items.forEach((el, i) => {
-      const rect = el.getBoundingClientRect()
-      if (y >= rect.top && y <= rect.bottom) targetIdx = i
+    listRef.current.querySelectorAll('[data-item]').forEach((el, i) => {
+      const r = el.getBoundingClientRect()
+      if (y >= r.top && y <= r.bottom) setDragOver(i)
     })
-    if (targetIdx !== null && targetIdx !== touchSrcIdx.current) setDragOver(targetIdx)
   }
-
   const onTouchEnd = () => {
-    if (touchSrcIdx.current !== null && dragOver !== null && dragOver !== touchSrcIdx.current) {
-      applyReorder(touchSrcIdx.current, dragOver)
-    }
+    if (touchSrcIdx.current !== null && dragOver !== null) applyReorder(touchSrcIdx.current, dragOver)
     touchSrcIdx.current = null; setDragOver(null)
   }
 
-  const applyReorder = (fromIdx, toIdx) => {
-    const newOrder = [...order]
-    const [moved]  = newOrder.splice(fromIdx, 1)
-    newOrder.splice(toIdx, 0, moved)
-    setOrder(newOrder); setActiveIdx(0)
-    routeBuiltFallback.current = false
-    routeBuiltGPS.current = false
-    setTimeout(() => {
-      if (gpsPos) { routeBuiltGPS.current = true; buildRoutes(gpsPos) }
-      else { routeBuiltFallback.current = true; buildRoutes(origin.current) }
-    }, 100)
-    speak(`Ordem atualizada. Parada 1: ${pedidos[newOrder[0]]?.cliente_nome||pedidos[newOrder[0]]?.endereco}`)
-  }
+  const centerOnMe = () => { if (gpsPos && mapInst.current) mapInst.current.setView([gpsPos.lat, gpsPos.lng], 16, { animate: true }) }
 
-  const currentOrder = orderedPedidos[activeIdx]
   const currentRoute = currentOrder ? routeData[pedidos.indexOf(currentOrder)] : null
   const stillLoading = loadingIdx.length > 0
 
@@ -355,23 +377,17 @@ export default function MapView() {
     <div style={s.page}>
       <div ref={mapRef} style={s.map} />
 
-      {/* Voltar */}
-      <button style={s.backBtn} onClick={() => navigate('/courier')}>
-        <ArrowLeft size={16} /> Voltar
-      </button>
+      <button style={s.backBtn} onClick={() => navigate('/courier')}><ArrowLeft size={16}/> Voltar</button>
+      <button style={s.locateBtn} onClick={centerOnMe}><Locate size={18} color={gpsPos?'var(--accent)':'var(--text-3)'}/></button>
 
-      {/* GPS */}
-      <button style={s.locateBtn} onClick={centerOnMe}>
-        <Locate size={18} color={gpsPos ? 'var(--accent)' : 'var(--text-3)'} />
-      </button>
-
-      {/* Badge distância / loading */}
+      {/* Badge distância */}
       {(stillLoading || currentRoute) && (
         <div style={s.badge}>
           {stillLoading
-            ? <><div style={s.spinner}/>Calculando rotas…</>
-            : <><div style={{width:10,height:10,borderRadius:'50%',background:COLORS[activeIdx%COLORS.length]}}/>
-                <span style={{fontWeight:700,color:COLORS[activeIdx%COLORS.length]}}>{fmtDist(currentRoute.distance)}</span>
+            ? <><div style={s.spin}/> Calculando rotas…</>
+            : <>
+                <div style={{width:10,height:10,borderRadius:'50%',background:COLORS[activeIdx%COLORS.length]}}/>
+                <b style={{color:COLORS[activeIdx%COLORS.length]}}>{fmtDist(currentRoute.distance)}</b>
                 <span style={{color:'var(--text-3)'}}>·</span>
                 <span style={{color:'var(--text-2)'}}>{fmtTime(currentRoute.duration)}</span>
               </>
@@ -379,74 +395,48 @@ export default function MapView() {
         </div>
       )}
 
-      {/* Estado da rota */}
-      {routeState !== ROUTE_IDLE && (
-        <div style={{...s.stateBadge, background:routeState===ROUTE_ACTIVE?'rgba(0,229,160,0.15)':'rgba(245,158,11,0.15)', borderColor:routeState===ROUTE_ACTIVE?'var(--accent-border)':'rgba(245,158,11,0.3)'}}>
-          <div style={{width:8,height:8,borderRadius:'50%',background:routeState===ROUTE_ACTIVE?'var(--accent)':'var(--pending)',animation:routeState===ROUTE_ACTIVE?'pulseDot 1.5s infinite':'none'}}/>
-          <span style={{fontSize:12,fontWeight:700,color:routeState===ROUTE_ACTIVE?'var(--accent)':'var(--pending)'}}>
-            {routeState===ROUTE_ACTIVE?'Em andamento':'Pausada'}
+      {/* Status rota */}
+      {routeState !== IDLE && (
+        <div style={{...s.stateBadge,background:routeState===ACTIVE?'rgba(0,229,160,.15)':'rgba(245,158,11,.15)',borderColor:routeState===ACTIVE?'var(--accent-border)':'rgba(245,158,11,.3)'}}>
+          <div style={{width:8,height:8,borderRadius:'50%',background:routeState===ACTIVE?'var(--accent)':'var(--pending)',animation:routeState===ACTIVE?'pulseDot 1.5s infinite':'none'}}/>
+          <span style={{fontSize:12,fontWeight:700,color:routeState===ACTIVE?'var(--accent)':'var(--pending)'}}>
+            {routeState===ACTIVE?'Em andamento':'Pausada'}
           </span>
         </div>
       )}
 
-      {/* ── Bottom sheet ─────────────────────────────────────────────────────── */}
+      {/* ── Bottom sheet ──────────────────────────────────────────────────────── */}
       <div style={s.sheet}>
         <div style={s.handle}/>
 
-        {/* Painel de reordenação — dentro do sheet, aparece quando showReorder */}
+        {/* Painel de reordenação */}
         {showReorder && orderedPedidos.length > 1 && (
           <div style={s.reorderWrap}>
             <div style={s.reorderHead}>
               <span style={{fontSize:13,fontWeight:700,color:'var(--text-1)'}}>Reordenar entregas</span>
               <button style={s.closeBtn} onClick={()=>setShowReorder(false)}>✕</button>
             </div>
-            <p style={{fontSize:11,color:'var(--text-3)',margin:'2px 0 8px',paddingLeft:2}}>Segure e arraste para mudar a ordem</p>
-            {/* Lista touch-friendly */}
-            <div
-              ref={listRef}
-              onTouchMove={onTouchMove}
-              onTouchEnd={onTouchEnd}
-              style={{display:'flex',flexDirection:'column',gap:6,touchAction:'none'}}
-            >
-              {order.map((realIdx, seqIdx) => {
-                const ped   = pedidos[realIdx]
-                const color = COLORS[seqIdx % COLORS.length]
+            <p style={{fontSize:11,color:'var(--text-3)',margin:'0 0 8px',paddingLeft:2}}>Segure e arraste para mudar a ordem</p>
+            <div ref={listRef} style={{display:'flex',flexDirection:'column',gap:6,touchAction:'none'}}
+              onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+              {seqOrder.map((realIdx, seqIdx) => {
+                const ped = pedidos[realIdx]
                 return (
-                  <div
-                    key={realIdx}
-                    data-reorder-item
+                  <div key={realIdx} data-item
                     draggable
-                    onDragStart={e => onDragStart(e, seqIdx)}
-                    onDragOver={e => onDragOver(e, seqIdx)}
-                    onDrop={e => onDrop(e, seqIdx)}
-                    onDragEnd={() => { dragSrc.current=null; setDragOver(null) }}
-                    onTouchStart={e => onTouchStart(e, seqIdx)}
-                    style={{
-                      display:'flex', alignItems:'center', gap:10,
-                      padding:'10px 12px', borderRadius:10,
-                      background: dragOver===seqIdx ? 'var(--accent-dim)' : 'var(--bg-3)',
-                      border:`1px solid ${dragOver===seqIdx ? 'var(--accent)' : 'var(--border)'}`,
-                      opacity: dragSrc.current===seqIdx ? 0.4 : 1,
-                      transition:'background 0.15s, border-color 0.15s',
-                      userSelect:'none', WebkitUserSelect:'none',
-                    }}>
-                    {/* Número colorido */}
-                    <div style={{width:30,height:30,borderRadius:'50%',background:color,color:'#080D1A',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,flexShrink:0}}>
-                      {seqIdx+1}
-                    </div>
-                    {/* Textos */}
+                    onDragStart={e=>onDragStart(e,seqIdx)} onDragOver={e=>onDragOver(e,seqIdx)}
+                    onDrop={e=>onDrop(e,seqIdx)} onDragEnd={()=>{dragSrc.current=null;setDragOver(null)}}
+                    onTouchStart={e=>onTouchStart(e,seqIdx)}
+                    style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,
+                      background:dragOver===seqIdx?'var(--accent-dim)':'var(--bg-3)',
+                      border:`1px solid ${dragOver===seqIdx?'var(--accent)':'var(--border)'}`,
+                      opacity:dragSrc.current===seqIdx?.4:1, userSelect:'none', WebkitUserSelect:'none'}}>
+                    <div style={{width:30,height:30,borderRadius:'50%',background:COLORS[seqIdx%COLORS.length],color:'#080D1A',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,flexShrink:0}}>{seqIdx+1}</div>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:600,color:'var(--text-1)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                        {ped?.cliente_nome || 'Sem nome'}
-                      </div>
-                      <div style={{fontSize:11,color:'var(--text-3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',marginTop:1}}>
-                        {ped?.endereco}
-                      </div>
+                      <div style={{fontSize:13,fontWeight:600,color:'var(--text-1)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{ped?.cliente_nome||'Sem nome'}</div>
+                      <div style={{fontSize:11,color:'var(--text-3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',marginTop:1}}>{ped?.endereco}</div>
                     </div>
-                    {/* Handle */}
-                    <div style={{padding:'4px 2px',cursor:'grab',color:'var(--text-3)',flexShrink:0,touchAction:'none'}}>
-                      <GripVertical size={18}/>
-                    </div>
+                    <GripVertical size={18} color="var(--text-3)" style={{flexShrink:0,touchAction:'none'}}/>
                   </div>
                 )
               })}
@@ -455,26 +445,19 @@ export default function MapView() {
         )}
 
         {/* Navegação entre paradas */}
-        {orderedPedidos.length > 1 && !showReorder && (
+        {!showReorder && orderedPedidos.length > 1 && (
           <div style={s.stopNav}>
-            <button style={{...s.navBtn, opacity:activeIdx===0?0.3:1}} disabled={activeIdx===0} onClick={()=>selectStop(activeIdx-1)}>
-              <ChevronLeft size={18}/>
-            </button>
+            <button style={{...s.navBtn,opacity:activeIdx===0?.3:1}} disabled={activeIdx===0} onClick={()=>selectStop(activeIdx-1)}><ChevronLeft size={18}/></button>
             <div style={{textAlign:'center',flex:1}}>
               <div style={{fontSize:12,fontWeight:600,color:'var(--text-2)'}}>Parada {activeIdx+1} de {orderedPedidos.length}</div>
               <div style={{display:'flex',justifyContent:'center',gap:5,marginTop:5}}>
                 {orderedPedidos.map((_,i)=>(
-                  <button key={i} onClick={()=>selectStop(i)} style={{width:i===activeIdx?20:7,height:7,borderRadius:4,background:i===activeIdx?COLORS[i%COLORS.length]:'var(--border-2)',transition:'all 0.25s',cursor:'pointer',border:'none',padding:0}}/>
+                  <button key={i} onClick={()=>selectStop(i)} style={{width:i===activeIdx?20:7,height:7,borderRadius:4,background:i===activeIdx?COLORS[i%COLORS.length]:'var(--border-2)',transition:'all .25s',cursor:'pointer',border:'none',padding:0}}/>
                 ))}
               </div>
             </div>
-            <button style={{...s.navBtn, opacity:activeIdx===orderedPedidos.length-1?0.3:1}} disabled={activeIdx===orderedPedidos.length-1} onClick={()=>selectStop(activeIdx+1)}>
-              <ChevronRight size={18}/>
-            </button>
-            {/* Botão reordenar dentro da navegação */}
-            <button style={s.reorderToggle} onClick={()=>setShowReorder(true)} title="Reordenar">
-              <GripVertical size={15}/>
-            </button>
+            <button style={{...s.navBtn,opacity:activeIdx===orderedPedidos.length-1?.3:1}} disabled={activeIdx===orderedPedidos.length-1} onClick={()=>selectStop(activeIdx+1)}><ChevronRight size={18}/></button>
+            <button style={s.navBtn} onClick={()=>setShowReorder(true)}><GripVertical size={15}/></button>
           </div>
         )}
 
@@ -494,39 +477,32 @@ export default function MapView() {
               {currentOrder.cliente_telefone && <InfoRow icon={Phone} text={currentOrder.cliente_telefone}/>}
               <InfoRow icon={MapPin} text={currentOrder.endereco}/>
             </div>
-            <div style={s.deliveryBtns}>
-              <a href={`tel:${currentOrder.cliente_telefone}`} style={s.callBtn}>
-                <Phone size={15}/> Ligar
-              </a>
-              <button style={s.navAppBtn} onClick={() => setShowNavApps(v => !v)}>
-                <span style={{ fontSize:16 }}>🧭</span> Navegar
-              </button>
-              <button style={s.confirmBtn} onClick={()=>navigate(`/confirm/${currentOrder.id}`)}>
-                <CheckCircle size={16}/> Confirmar
-              </button>
+
+            {/* Botões de ação */}
+            <div style={s.actionBtns}>
+              <a href={`tel:${currentOrder.cliente_telefone}`} style={s.callBtn}><Phone size={14}/> Ligar</a>
+              <button style={s.navAppBtn} onClick={()=>setShowNavApps(v=>!v)}>🧭 Navegar</button>
+              <button style={s.confirmBtn} onClick={()=>navigate(`/confirm/${currentOrder.id}`)}><CheckCircle size={15}/> Confirmar</button>
             </div>
 
-            {/* Seletor de app de navegação */}
+            {/* Seletor de app */}
             {showNavApps && (
-              <div style={s.navAppsPanel} className="fade-up">
-                <div style={s.navAppsTitle}>Abrir navegação em:</div>
-                <div style={s.navAppsGrid}>
+              <div style={s.navPanel} className="fade-up">
+                <div style={s.navPanelTitle}>Abrir no aplicativo:</div>
+                <div style={s.navGrid}>
                   {[
-                    { id:'waze',  label:'Waze',         emoji:'🟦', color:'#33CCFF' },
-                    { id:'gmaps', label:'Google Maps',   emoji:'🗺️', color:'#34A853' },
-                    { id:'amaps', label:'Apple Maps',    emoji:'🍎', color:'#A0C4FF' },
-                    { id:'moovit',label:'Moovit',        emoji:'🚌', color:'#F5A623' },
+                    {id:'waze',  label:'Waze',        emoji:'🟦'},
+                    {id:'gmaps', label:'Google Maps',  emoji:'🗺️'},
+                    {id:'amaps', label:'Apple Maps',   emoji:'🍎'},
+                    {id:'moovit',label:'Moovit',       emoji:'🚌'},
                   ].map(app => (
-                    <button key={app.id} style={{ ...s.navAppItem, borderColor: app.color + '55' }}
-                      onClick={() => openNavApp(app.id)}>
-                      <span style={{ fontSize:26 }}>{app.emoji}</span>
-                      <span style={{ fontSize:11, fontWeight:600, color:'var(--text-2)' }}>{app.label}</span>
+                    <button key={app.id} style={s.navAppItem} onClick={()=>openNavApp(app.id)}>
+                      <span style={{fontSize:24}}>{app.emoji}</span>
+                      <span style={{fontSize:10,fontWeight:600,color:'var(--text-2)'}}>{app.label}</span>
                     </button>
                   ))}
                 </div>
-                <button style={s.navAppsCancelBtn} onClick={() => setShowNavApps(false)}>
-                  Cancelar
-                </button>
+                <button style={s.cancelBtn} onClick={()=>setShowNavApps(false)}>Cancelar</button>
               </div>
             )}
           </>
@@ -535,15 +511,9 @@ export default function MapView() {
         {/* Controles de rota */}
         {!showReorder && (
           <div style={s.routeControls}>
-            {routeState===ROUTE_IDLE   && <button style={s.startBtn} onClick={startRoute}><Play size={16}/> Iniciar rota</button>}
-            {routeState===ROUTE_ACTIVE && <>
-              <button style={s.pauseBtn} onClick={pauseRoute}><Pause size={16}/> Pausar</button>
-              <button style={s.endBtn}   onClick={endRoute}><StopCircle size={16}/> Finalizar</button>
-            </>}
-            {routeState===ROUTE_PAUSED && <>
-              <button style={s.startBtn} onClick={resumeRoute}><Play size={16}/> Retomar</button>
-              <button style={s.endBtn}   onClick={endRoute}><StopCircle size={16}/> Finalizar</button>
-            </>}
+            {routeState===IDLE   && <button style={s.startBtn} onClick={startRoute}><Play size={16}/> Iniciar rota</button>}
+            {routeState===ACTIVE && <><button style={s.pauseBtn} onClick={pauseRoute}><Pause size={16}/> Pausar</button><button style={s.endBtn} onClick={endRoute}><StopCircle size={16}/> Finalizar</button></>}
+            {routeState===PAUSED && <><button style={s.startBtn} onClick={resumeRoute}><Play size={16}/> Retomar</button><button style={s.endBtn} onClick={endRoute}><StopCircle size={16}/> Finalizar</button></>}
           </div>
         )}
       </div>
@@ -561,34 +531,33 @@ function InfoRow({ icon:Icon, text }) {
 }
 
 const s = {
-  page:      { position:'fixed', inset:0, display:'flex', flexDirection:'column', background:'var(--bg)' },
-  map:       { flex:1, zIndex:1 },
-  backBtn:   { position:'absolute', top:16, left:16, zIndex:500, display:'flex', alignItems:'center', gap:7, padding:'10px 14px', background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, boxShadow:'var(--shadow)' },
-  locateBtn: { position:'absolute', top:16, right:16, zIndex:500, width:42, height:42, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'var(--shadow)', cursor:'pointer' },
-  badge:     { position:'absolute', top:70, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:20, padding:'7px 14px', fontSize:12, color:'var(--text-2)', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
-  spinner:   { width:12, height:12, borderRadius:'50%', border:'2px solid var(--accent)', borderTopColor:'transparent', animation:'spin 0.7s linear infinite' },
-  stateBadge:{ position:'absolute', top:110, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, borderRadius:20, border:'1px solid', padding:'6px 13px', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
-  sheet:     { background:'var(--bg-2)', borderTop:'1px solid var(--border-2)', borderRadius:'20px 20px 0 0', padding:'12px 16px 28px', zIndex:400, flexShrink:0 },
-  handle:    { width:34, height:3, background:'var(--border-2)', borderRadius:2, margin:'0 auto 14px' },
-  reorderWrap:{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:12, padding:'12px 12px 14px', marginBottom:14 },
-  reorderHead:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 },
-  closeBtn:  { width:26, height:26, borderRadius:7, background:'var(--bg-2)', border:'1px solid var(--border)', color:'var(--text-2)', fontSize:12, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' },
-  stopNav:   { display:'flex', alignItems:'center', gap:8, marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' },
-  navBtn:    { width:36, height:36, borderRadius:9, background:'var(--bg-3)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-2)', cursor:'pointer', flexShrink:0 },
-  reorderToggle:{ width:36, height:36, borderRadius:9, background:'var(--bg-3)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-2)', cursor:'pointer', flexShrink:0 },
-  sheetRow:  { display:'flex', alignItems:'flex-start', gap:12, marginBottom:10 },
-  stopBadge: { width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
-  deliveryBtns:{ display:'flex', gap:10, marginBottom:12 },
-  callBtn:   { flex:1, padding:'11px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:7, textDecoration:'none' },
-  navAppBtn: { flex:1, padding:'11px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:6 },
-  navAppsPanel: { background:'var(--bg-3)', border:'1px solid var(--border-2)', borderRadius:14, padding:'14px 12px 12px', marginBottom:12 },
-  navAppsTitle: { fontSize:12, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:12, textAlign:'center' },
-  navAppsGrid: { display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, marginBottom:10 },
-  navAppItem: { display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'12px 6px', borderRadius:12, background:'var(--bg-2)', border:'1px solid', cursor:'pointer' },
-  navAppsCancelBtn: { width:'100%', padding:'9px', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:9, color:'var(--text-3)', fontSize:13, fontWeight:500, cursor:'pointer' },
-  confirmBtn:{ flex:1.5, padding:'11px 0', background:'var(--accent)', borderRadius:10, color:'#080D1A', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:6 },
-  routeControls:{ display:'flex', gap:8 },
-  startBtn:  { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--accent)', color:'#080D1A', borderRadius:10, fontSize:14, fontWeight:800 },
-  pauseBtn:  { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--pending-bg)', border:'1px solid rgba(245,158,11,0.3)', color:'var(--pending)', borderRadius:10, fontSize:14, fontWeight:700 },
-  endBtn:    { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--danger-bg)', border:'1px solid rgba(248,113,113,0.3)', color:'var(--danger)', borderRadius:10, fontSize:14, fontWeight:700 },
+  page:      {position:'fixed',inset:0,display:'flex',flexDirection:'column',background:'var(--bg)'},
+  map:       {flex:1,zIndex:1},
+  backBtn:   {position:'absolute',top:16,left:16,zIndex:500,display:'flex',alignItems:'center',gap:7,padding:'10px 14px',background:'var(--bg-2)',border:'1px solid var(--border-2)',borderRadius:10,color:'var(--text-1)',fontSize:13,fontWeight:600,boxShadow:'var(--shadow)'},
+  locateBtn: {position:'absolute',top:16,right:16,zIndex:500,width:42,height:42,background:'var(--bg-2)',border:'1px solid var(--border-2)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'var(--shadow)',cursor:'pointer'},
+  badge:     {position:'absolute',top:70,left:'50%',transform:'translateX(-50%)',zIndex:500,display:'flex',alignItems:'center',gap:7,background:'var(--bg-2)',border:'1px solid var(--border-2)',borderRadius:20,padding:'7px 14px',fontSize:12,color:'var(--text-2)',boxShadow:'var(--shadow)',whiteSpace:'nowrap'},
+  spin:      {width:12,height:12,borderRadius:'50%',border:'2px solid var(--accent)',borderTopColor:'transparent',animation:'spin 0.7s linear infinite'},
+  stateBadge:{position:'absolute',top:110,left:'50%',transform:'translateX(-50%)',zIndex:500,display:'flex',alignItems:'center',gap:7,borderRadius:20,border:'1px solid',padding:'6px 13px',boxShadow:'var(--shadow)',whiteSpace:'nowrap'},
+  sheet:     {background:'var(--bg-2)',borderTop:'1px solid var(--border-2)',borderRadius:'20px 20px 0 0',padding:'12px 16px 28px',zIndex:400,flexShrink:0},
+  handle:    {width:34,height:3,background:'var(--border-2)',borderRadius:2,margin:'0 auto 14px'},
+  reorderWrap:{background:'var(--bg-3)',border:'1px solid var(--border)',borderRadius:12,padding:'12px 12px 14px',marginBottom:14},
+  reorderHead:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6},
+  closeBtn:  {width:26,height:26,borderRadius:7,background:'var(--bg-2)',border:'1px solid var(--border)',color:'var(--text-2)',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'},
+  stopNav:   {display:'flex',alignItems:'center',gap:8,marginBottom:12,paddingBottom:12,borderBottom:'1px solid var(--border)'},
+  navBtn:    {width:36,height:36,borderRadius:9,background:'var(--bg-3)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text-2)',cursor:'pointer',flexShrink:0},
+  sheetRow:  {display:'flex',alignItems:'flex-start',gap:12,marginBottom:10},
+  stopBadge: {width:40,height:40,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0},
+  actionBtns:{display:'flex',gap:8,marginBottom:10},
+  callBtn:   {flex:1,padding:'11px 0',background:'var(--bg-3)',border:'1px solid var(--border)',borderRadius:10,color:'var(--text-1)',fontSize:12,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:6,textDecoration:'none'},
+  navAppBtn: {flex:1,padding:'11px 0',background:'var(--bg-3)',border:'1px solid var(--border)',borderRadius:10,color:'var(--text-1)',fontSize:12,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:6},
+  confirmBtn:{flex:1.5,padding:'11px 0',background:'var(--accent)',borderRadius:10,color:'#080D1A',fontSize:12,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',gap:6},
+  navPanel:  {background:'var(--bg-3)',border:'1px solid var(--border)',borderRadius:14,padding:'12px',marginBottom:10},
+  navPanelTitle:{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10,textAlign:'center'},
+  navGrid:   {display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:10},
+  navAppItem:{display:'flex',flexDirection:'column',alignItems:'center',gap:6,padding:'12px 6px',borderRadius:12,background:'var(--bg-2)',border:'1px solid var(--border)',cursor:'pointer'},
+  cancelBtn: {width:'100%',padding:'9px',background:'var(--bg-2)',border:'1px solid var(--border)',borderRadius:9,color:'var(--text-3)',fontSize:13,cursor:'pointer'},
+  routeControls:{display:'flex',gap:8},
+  startBtn:  {flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'13px 0',background:'var(--accent)',color:'#080D1A',borderRadius:10,fontSize:14,fontWeight:800},
+  pauseBtn:  {flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'13px 0',background:'var(--pending-bg)',border:'1px solid rgba(245,158,11,.3)',color:'var(--pending)',borderRadius:10,fontSize:14,fontWeight:700},
+  endBtn:    {flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'13px 0',background:'var(--danger-bg)',border:'1px solid rgba(248,113,113,.3)',color:'var(--danger)',borderRadius:10,fontSize:14,fontWeight:700},
 }
