@@ -1,3 +1,4 @@
+import AddressAutocomplete from '../components/AddressAutocomplete'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, useOrders } from '../App'
@@ -33,7 +34,8 @@ export default function CourierDashboard() {
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving]     = useState(false)
   const [form, setForm]         = useState({
-    id_externo: '', cliente_nome: '', cliente_telefone: '', endereco: '', localizacao_carro: ''
+    id_externo: '', cliente_nome: '', cliente_telefone: '', endereco: '',
+    localizacao_carro: '', lat: null, lng: null
   })
 
   useEffect(() => {
@@ -68,6 +70,8 @@ export default function CourierDashboard() {
       entregador_id:   user.id,
       entregador_nome: user.name,
       endereco:        form.endereco.trim(),
+      ...(form.lat && { lat: form.lat }),
+      ...(form.lng && { lng: form.lng }),
       ...(form.cliente_nome      && { cliente_nome:      form.cliente_nome.trim() }),
       ...(form.cliente_telefone  && { cliente_telefone:  form.cliente_telefone.trim() }),
       ...(form.localizacao_carro && { localizacao_carro: form.localizacao_carro }),
@@ -181,9 +185,12 @@ export default function CourierDashboard() {
               <FormField icon={Hash} label="Nº do pedido" placeholder="Auto (ex: PED-042)" optional
                 value={form.id_externo} onChange={v => setForm(p => ({ ...p, id_externo: v }))} />
 
-              {/* Endereço — obrigatório */}
-              <FormField icon={MapPin} label="Endereço de entrega *" placeholder="Rua das Flores, 142, Aldeota"
-                value={form.endereco} onChange={v => setForm(p => ({ ...p, endereco: v }))} />
+              {/* Endereço — obrigatório, com autocomplete */}
+              <AddressAutocomplete
+                value={form.endereco}
+                onChange={v => setForm(p => ({ ...p, endereco: v }))}
+                onSelect={({ address, lat, lng }) => setForm(p => ({ ...p, endereco: address, lat, lng }))}
+              />
 
               {/* Nome — opcional */}
               <FormField icon={User} label="Nome do cliente" placeholder="Ana Beatriz Silva" optional
