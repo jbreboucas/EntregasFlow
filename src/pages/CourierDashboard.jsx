@@ -297,6 +297,11 @@ function CourierCard({ order, delay, isAvailable, onAssociate, onNavigate, onCon
       <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
         {order.cliente_telefone && <InfoRow icon={Phone}  text={order.cliente_telefone} />}
         <InfoRow icon={MapPin} text={order.endereco} />
+        {order.recebido_por && (
+          <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--delivered)', background:'var(--delivered-bg)', border:'1px solid rgba(52,211,153,0.2)', borderRadius:6, padding:'4px 9px', width:'fit-content' }}>
+            ✓ Recebido por <strong>{order.recebido_por}</strong>
+          </div>
+        )}
         {order.localizacao_carro && (
           <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--accent)', background:'var(--accent-dim)', border:'1px solid var(--accent-border)', borderRadius:6, padding:'4px 9px', width:'fit-content' }}>
             📦 {CAR_LABEL(order.localizacao_carro)}

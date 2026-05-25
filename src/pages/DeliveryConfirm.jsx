@@ -1,55 +1,22 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useOrders, useAuth } from '../App'
-import { updatePedido, createEntrega, uploadFoto, uploadAssinatura } from '../lib/supabase'
-import { ArrowLeft, Camera, Pen, CheckCircle, RotateCcw, Package } from 'lucide-react'
+import { updatePedido, createEntrega, uploadFoto } from '../lib/supabase'
+import { ArrowLeft, Camera, User, CheckCircle, RotateCcw, Package } from 'lucide-react'
 
 export default function DeliveryConfirm() {
   const { orderId } = useParams()
-  const navigate = useNavigate()
+  const navigate    = useNavigate()
   const { orders, updateOrder } = useOrders()
-  const { user } = useAuth()
-  const order = orders.find(o => o.id === orderId)
+  const { user }    = useAuth()
+  const order       = orders.find(o => o.id === orderId)
 
-  const [step,       setStep]       = useState('photo')
-  const [photo,      setPhoto]      = useState(null)
-  const [photoFile,  setPhotoFile]  = useState(null)
-  const [signed,     setSigned]     = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-
-  const canvasRef = useRef(null)
-  const isDrawing = useRef(false)
-  const lastPos   = useRef(null)
-
-  const setupCanvas = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const rect = canvas.getBoundingClientRect()
-    canvas.width  = rect.width  * window.devicePixelRatio
-    canvas.height = rect.height * window.devicePixelRatio
-    const ctx = canvas.getContext('2d')
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
-    ctx.strokeStyle = '#00E5A0'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-  }, [])
-
-  useEffect(() => { if (step === 'signature') setTimeout(setupCanvas, 50) }, [step, setupCanvas])
-
-  const getXY = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect()
-    const src  = e.touches ? e.touches[0] : e
-    return { x: src.clientX - rect.left, y: src.clientY - rect.top }
-  }
-  const onStart = (e) => { e.preventDefault(); isDrawing.current = true; lastPos.current = getXY(e) }
-  const onMove  = (e) => {
-    e.preventDefault()
-    if (!isDrawing.current) return
-    const ctx = canvasRef.current.getContext('2d')
-    const pos = getXY(e)
-    ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(pos.x, pos.y); ctx.stroke()
-    lastPos.current = pos; setSigned(true)
-  }
-  const onEnd = () => { isDrawing.current = false }
-  const clearSig = () => { setupCanvas(); setSigned(false) }
+  const [step,        setStep]        = useState('photo')   // 'photo' | 'recipient' | 'done'
+  const [photo,       setPhoto]       = useState(null)
+  const [photoFile,   setPhotoFile]   = useState(null)
+  const [recebidoPor, setRecebidoPor] = useState('')
+  const [submitting,  setSubmitting]  = useState(false)
+  const [error,       setError]       = useState('')
 
   const handlePhoto = (e) => {
     const file = e.target.files[0]
@@ -59,28 +26,29 @@ export default function DeliveryConfirm() {
   }
 
   const handleSubmit = async () => {
+    if (!recebidoPor.trim()) { setError('Informe o nome de quem recebeu.'); return }
     setSubmitting(true)
+    setError('')
+
     try {
-      let foto_url = null, assinatura_url = null
+      let foto_url = null
+      if (photoFile) foto_url = await uploadFoto(orderId, photoFile)
 
-      if (photoFile) {
-        foto_url = await uploadFoto(orderId, photoFile)
-      }
+      const recebido = recebidoPor.trim()
 
-      const sigBlob = await new Promise(r => canvasRef.current?.toBlob(r, 'image/png'))
-      if (sigBlob) {
-        assinatura_url = await uploadAssinatura(orderId, sigBlob)
-      }
+      await Promise.all([
+        createEntrega({ pedido_id: orderId, entregador_id: user.id, foto_url, recebido_por: recebido }),
+        updatePedido(orderId, { status: 'entregue', recebido_por: recebido }),
+      ])
 
-      await createEntrega({ pedido_id: orderId, entregador_id: user.id, foto_url, assinatura_url })
-      await updatePedido(orderId, { status: 'entregue' })
-      updateOrder(orderId, { status: 'entregue' })
+      updateOrder(orderId, { status: 'entregue', recebido_por: recebido })
       setStep('done')
     } catch (err) {
       console.error(err)
-      // Fallback: atualiza sem upload
-      await updatePedido(orderId, { status: 'entregue' })
-      updateOrder(orderId, { status: 'entregue' })
+      // fallback sem upload
+      const recebido = recebidoPor.trim()
+      await updatePedido(orderId, { status: 'entregue', recebido_por: recebido })
+      updateOrder(orderId, { status: 'entregue', recebido_por: recebido })
       setStep('done')
     }
     setSubmitting(false)
@@ -92,77 +60,151 @@ export default function DeliveryConfirm() {
     </div>
   )
 
+  // Progresso visual
+  const steps = ['photo', 'recipient', 'done']
+  const stepIdx = steps.indexOf(step)
+
   return (
     <div style={s.page}>
+      {/* Header */}
       <header style={s.header}>
-        <button style={s.backBtn} onClick={() => step === 'signature' ? setStep('photo') : navigate(`/map/${orderId}`)}>
+        <button style={s.backBtn}
+          onClick={() => step === 'recipient' ? setStep('photo') : navigate(`/map/single/${orderId}`)}>
           <ArrowLeft size={17} />
         </button>
         <div style={{ flex:1 }}>
           <div style={s.headerTitle}>Confirmar entrega</div>
-          <div style={s.headerSub}># {orderId} · {order.cliente_nome}</div>
+          <div style={s.headerSub}># {orderId}{order.cliente_nome ? ` · ${order.cliente_nome}` : ''}</div>
         </div>
-        <div style={s.progress}>
-          <div style={{ ...s.dot, background:'var(--accent)' }} />
-          <div style={{ ...s.line, background: step !== 'photo' ? 'var(--accent)' : 'var(--border-2)' }} />
-          <div style={{ ...s.dot, background: step !== 'photo' ? 'var(--accent)' : 'var(--border-2)' }} />
-        </div>
+        {/* Barra de progresso */}
+        {step !== 'done' && (
+          <div style={s.progressBar}>
+            {[0,1].map(i => (
+              <div key={i} style={{ ...s.progressSeg, background: i < stepIdx ? 'var(--accent)' : i === stepIdx ? 'var(--accent)' : 'var(--border-2)', opacity: i === stepIdx ? 1 : i < stepIdx ? 0.5 : 0.3 }} />
+            ))}
+          </div>
+        )}
       </header>
 
       <div style={s.content}>
+
+        {/* ── Etapa 1: Foto ── */}
         {step === 'photo' && (
           <div className="fade-up">
-            <SectionHead icon={Camera} title="Foto da entrega" desc="Fotografe a entrega para registrar a comprovação." />
-            <label style={s.photoArea}>
+            <SectionHead icon={Camera} title="Foto da entrega"
+              desc="Fotografe a encomenda ou o local da entrega como comprovante." />
+
+            <label style={{ ...s.photoArea, cursor:'pointer' }}>
               {photo
-                ? <img src={photo} alt="Foto" style={s.photoImg} />
+                ? <img src={photo} alt="Comprovante" style={s.photoImg} />
                 : <div style={s.photoPlaceholder}>
                     <div style={s.photoIconWrap}><Camera size={34} color="var(--text-3)" /></div>
                     <span style={s.photoLabel}>Toque para fotografar</span>
                     <span style={s.photoSub}>ou escolher da galeria</span>
                   </div>
               }
-              <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display:'none' }} />
+              <input type="file" accept="image/*" capture="environment"
+                onChange={handlePhoto} style={{ display:'none' }} />
             </label>
-            {photo && <button style={s.retakeBtn} onClick={() => { setPhoto(null); setPhotoFile(null) }}><RotateCcw size={13} /> Tirar nova foto</button>}
-            <button style={{ ...s.primaryBtn, opacity: photo ? 1 : 0.38, marginTop:24 }} disabled={!photo} onClick={() => setStep('signature')}>
-              Próximo — Assinatura →
-            </button>
-          </div>
-        )}
 
-        {step === 'signature' && (
-          <div className="fade-up">
-            <SectionHead icon={Pen} title="Assinatura do cliente" desc="Peça ao cliente para assinar abaixo confirmando o recebimento." />
-            <div style={s.canvasWrap}>
-              <canvas ref={canvasRef} style={s.canvas}
-                onMouseDown={onStart} onMouseMove={onMove} onMouseUp={onEnd} onMouseLeave={onEnd}
-                onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} />
-              {!signed && <div style={s.canvasHint}><Pen size={22} color="var(--text-3)" /><span style={s.hintTxt}>Assine aqui</span></div>}
+            {photo && (
+              <button style={s.retakeBtn}
+                onClick={() => { setPhoto(null); setPhotoFile(null) }}>
+                <RotateCcw size={13} /> Tirar outra foto
+              </button>
+            )}
+
+            <div style={{ display:'flex', gap:10, marginTop:24 }}>
+              <button style={{ ...s.secondaryBtn }}
+                onClick={() => setStep('recipient')}>
+                Pular foto →
+              </button>
+              <button
+                style={{ ...s.primaryBtn, flex:2, opacity: photo ? 1 : 0.38 }}
+                disabled={!photo}
+                onClick={() => setStep('recipient')}>
+                Próximo →
+              </button>
             </div>
-            <button style={s.retakeBtn} onClick={clearSig}><RotateCcw size={13} /> Limpar assinatura</button>
-            <button style={{ ...s.primaryBtn, opacity: signed && !submitting ? 1 : 0.38, marginTop:24 }} disabled={!signed || submitting} onClick={handleSubmit}>
-              {submitting ? 'Confirmando…' : <><CheckCircle size={17} /> Confirmar entrega</>}
+          </div>
+        )}
+
+        {/* ── Etapa 2: Nome do recebedor ── */}
+        {step === 'recipient' && (
+          <div className="fade-up">
+            <SectionHead icon={User} title="Quem recebeu?"
+              desc="Digite o nome da pessoa que recebeu a encomenda." />
+
+            {/* Preview da foto (miniatura) */}
+            {photo && (
+              <div style={s.photoThumb}>
+                <img src={photo} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                <div style={s.photoThumbBadge}>✓ Foto anexada</div>
+              </div>
+            )}
+
+            <div style={s.recipientField}>
+              <div style={s.recipientIconWrap}>
+                <User size={20} color="var(--accent)" />
+              </div>
+              <input
+                style={s.recipientInput}
+                placeholder="Nome completo de quem recebeu"
+                value={recebidoPor}
+                autoFocus
+                onChange={e => { setRecebidoPor(e.target.value); setError('') }}
+                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              />
+            </div>
+
+            {error && (
+              <div style={s.errorBox}>{error}</div>
+            )}
+
+            <button
+              style={{ ...s.primaryBtn, marginTop:24, opacity: submitting ? 0.6 : 1 }}
+              disabled={submitting}
+              onClick={handleSubmit}>
+              {submitting
+                ? 'Confirmando…'
+                : <><CheckCircle size={17} /> Confirmar entrega</>}
             </button>
           </div>
         )}
 
+        {/* ── Etapa 3: Sucesso ── */}
         {step === 'done' && (
           <div style={s.done} className="scale-in">
-            <div style={s.doneRing}><CheckCircle size={52} color="var(--delivered)" strokeWidth={1.5} /></div>
+            <div style={s.doneRing}>
+              <CheckCircle size={52} color="var(--delivered)" strokeWidth={1.5} />
+            </div>
+
             <div style={s.doneTitle}>Entrega confirmada!</div>
+
             <div style={s.doneSub}>
-              O pedido <strong style={{ color:'var(--text-1)', fontFamily:'var(--mono)' }}>#{orderId}</strong> foi marcado como{' '}
-              <span style={{ color:'var(--delivered)', fontWeight:600 }}>Entregue</span> e o kanban foi atualizado em tempo real.
+              Pedido <strong style={{ color:'var(--text-1)', fontFamily:'var(--mono)' }}>#{orderId}</strong> marcado
+              como <span style={{ color:'var(--delivered)', fontWeight:600 }}>Entregue</span>.
             </div>
-            <div style={s.doneCard}>
-              <Package size={16} color="var(--text-3)" />
-              <div>
-                <div style={{ fontSize:13, fontWeight:600, color:'var(--text-1)' }}>{order.cliente_nome}</div>
-                <div style={{ fontSize:12, color:'var(--text-3)', marginTop:2 }}>{order.endereco}</div>
+
+            {recebidoPor && (
+              <div style={s.receiverCard}>
+                <div style={s.receiverIcon}><User size={16} color="var(--accent)" /></div>
+                <div>
+                  <div style={{ fontSize:11, color:'var(--text-3)', marginBottom:2 }}>Recebido por</div>
+                  <div style={{ fontSize:14, fontWeight:700, color:'var(--text-1)' }}>{recebidoPor}</div>
+                </div>
               </div>
-            </div>
-            <button style={{ ...s.primaryBtn, marginTop:8 }} onClick={() => navigate('/courier')}>Voltar ao painel</button>
+            )}
+
+            {photo && (
+              <img src={photo} alt="Comprovante"
+                style={{ width:'100%', maxWidth:300, borderRadius:10, border:'1px solid var(--border)', objectFit:'cover', maxHeight:160 }} />
+            )}
+
+            <button style={{ ...s.primaryBtn, marginTop:8 }}
+              onClick={() => navigate('/courier')}>
+              Voltar ao painel
+            </button>
           </div>
         )}
       </div>
@@ -185,30 +227,41 @@ function SectionHead({ icon:Icon, title, desc }) {
 }
 
 const s = {
-  page:{ height:'100vh', display:'flex', flexDirection:'column', background:'var(--bg)', overflow:'hidden' },
-  header:{ display:'flex', alignItems:'center', gap:14, padding:'0 16px', height:58, flexShrink:0, background:'var(--bg-2)', borderBottom:'1px solid var(--border)' },
-  backBtn:{ padding:8, background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:9, color:'var(--text-1)', display:'flex', alignItems:'center', flexShrink:0 },
-  headerTitle:{ fontSize:14, fontWeight:700, color:'var(--text-1)' },
-  headerSub:{ fontSize:11, color:'var(--text-3)', marginTop:1, fontFamily:'var(--mono)' },
-  progress:{ display:'flex', alignItems:'center', gap:5, flexShrink:0 },
-  dot:{ width:9, height:9, borderRadius:'50%', transition:'background 0.3s' },
-  line:{ width:26, height:2, borderRadius:1, transition:'background 0.3s' },
-  content:{ flex:1, overflowY:'auto', padding:'24px 18px', maxWidth:500, width:'100%', margin:'0 auto' },
-  photoArea:{ display:'flex', width:'100%', height:260, background:'var(--bg-2)', border:'2px dashed var(--border-2)', borderRadius:'var(--radius)', cursor:'pointer', overflow:'hidden', alignItems:'center', justifyContent:'center' },
-  photoImg:{ width:'100%', height:'100%', objectFit:'cover' },
-  photoPlaceholder:{ display:'flex', flexDirection:'column', alignItems:'center', gap:10 },
-  photoIconWrap:{ width:64, height:64, borderRadius:'50%', background:'var(--bg-3)', display:'flex', alignItems:'center', justifyContent:'center' },
-  photoLabel:{ fontSize:15, fontWeight:600, color:'var(--text-2)' },
-  photoSub:{ fontSize:12, color:'var(--text-3)' },
-  retakeBtn:{ display:'flex', alignItems:'center', gap:7, background:'transparent', color:'var(--text-3)', fontSize:13, padding:'8px 0', marginTop:10, border:'none' },
-  canvasWrap:{ position:'relative', background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius)', overflow:'hidden' },
-  canvas:{ display:'block', width:'100%', height:220, touchAction:'none', cursor:'crosshair' },
-  canvasHint:{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10, pointerEvents:'none', opacity:0.5 },
-  hintTxt:{ fontSize:14, color:'var(--text-3)' },
-  primaryBtn:{ display:'flex', alignItems:'center', justifyContent:'center', gap:9, width:'100%', padding:'15px 20px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:15, fontWeight:800 },
-  done:{ display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', paddingTop:40, gap:18 },
-  doneRing:{ width:96, height:96, borderRadius:'50%', background:'var(--delivered-bg)', border:'1px solid rgba(52,211,153,0.25)', display:'flex', alignItems:'center', justifyContent:'center' },
-  doneTitle:{ fontSize:26, fontWeight:900, color:'var(--text-1)', letterSpacing:'-0.5px' },
-  doneSub:{ fontSize:14, color:'var(--text-2)', lineHeight:1.75, maxWidth:300 },
-  doneCard:{ display:'flex', alignItems:'flex-start', gap:12, textAlign:'left', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'14px 16px', width:'100%', maxWidth:320 },
+  page: { height:'100vh', display:'flex', flexDirection:'column', background:'var(--bg)', overflow:'hidden' },
+  header: { display:'flex', alignItems:'center', gap:14, padding:'0 16px', height:58, flexShrink:0, background:'var(--bg-2)', borderBottom:'1px solid var(--border)' },
+  backBtn: { padding:8, background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:9, color:'var(--text-1)', display:'flex', alignItems:'center', flexShrink:0 },
+  headerTitle: { fontSize:14, fontWeight:700, color:'var(--text-1)' },
+  headerSub: { fontSize:11, color:'var(--text-3)', marginTop:1, fontFamily:'var(--mono)' },
+  progressBar: { display:'flex', gap:4, flexShrink:0 },
+  progressSeg: { width:26, height:3, borderRadius:2, transition:'all 0.3s' },
+  content: { flex:1, overflowY:'auto', padding:'24px 18px', maxWidth:500, width:'100%', margin:'0 auto' },
+
+  // Foto
+  photoArea: { display:'flex', width:'100%', height:240, background:'var(--bg-2)', border:'2px dashed var(--border-2)', borderRadius:'var(--radius)', overflow:'hidden', alignItems:'center', justifyContent:'center' },
+  photoImg: { width:'100%', height:'100%', objectFit:'cover' },
+  photoPlaceholder: { display:'flex', flexDirection:'column', alignItems:'center', gap:10 },
+  photoIconWrap: { width:64, height:64, borderRadius:'50%', background:'var(--bg-3)', display:'flex', alignItems:'center', justifyContent:'center' },
+  photoLabel: { fontSize:15, fontWeight:600, color:'var(--text-2)' },
+  photoSub: { fontSize:12, color:'var(--text-3)' },
+  retakeBtn: { display:'flex', alignItems:'center', gap:7, background:'transparent', color:'var(--text-3)', fontSize:13, padding:'8px 0', marginTop:10, border:'none', cursor:'pointer' },
+  photoThumb: { position:'relative', width:'100%', height:100, borderRadius:10, overflow:'hidden', marginBottom:20, border:'1px solid var(--border)' },
+  photoThumbBadge: { position:'absolute', bottom:8, right:8, background:'rgba(0,0,0,0.65)', color:'var(--delivered)', fontSize:11, fontWeight:600, padding:'3px 9px', borderRadius:20 },
+
+  // Recebedor
+  recipientField: { display:'flex', alignItems:'center', gap:0, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius)', overflow:'hidden', transition:'border-color 0.2s, box-shadow 0.2s' },
+  recipientIconWrap: { width:52, height:56, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--accent-dim)', flexShrink:0, borderRight:'1px solid var(--accent-border)' },
+  recipientInput: { flex:1, padding:'16px 16px', background:'transparent', border:'none', color:'var(--text-1)', fontSize:15, fontFamily:'var(--font)', outline:'none' },
+  errorBox: { marginTop:10, padding:'10px 14px', borderRadius:'var(--radius-sm)', background:'var(--danger-bg)', border:'1px solid rgba(248,113,113,0.2)', color:'var(--danger)', fontSize:13 },
+
+  // Botões
+  primaryBtn: { display:'flex', alignItems:'center', justifyContent:'center', gap:9, width:'100%', padding:'15px 20px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:15, fontWeight:800, transition:'opacity 0.2s' },
+  secondaryBtn: { flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'15px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-2)', fontSize:14, fontWeight:500 },
+
+  // Done
+  done: { display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', paddingTop:32, gap:18 },
+  doneRing: { width:96, height:96, borderRadius:'50%', background:'var(--delivered-bg)', border:'1px solid rgba(52,211,153,0.25)', display:'flex', alignItems:'center', justifyContent:'center' },
+  doneTitle: { fontSize:26, fontWeight:900, color:'var(--text-1)', letterSpacing:'-0.5px' },
+  doneSub: { fontSize:14, color:'var(--text-2)', lineHeight:1.75, maxWidth:300 },
+  receiverCard: { display:'flex', alignItems:'center', gap:14, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'14px 18px', width:'100%', maxWidth:300, textAlign:'left' },
+  receiverIcon: { width:36, height:36, borderRadius:9, background:'var(--accent-dim)', border:'1px solid var(--accent-border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
 }

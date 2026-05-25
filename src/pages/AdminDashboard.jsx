@@ -176,6 +176,7 @@ function OrderCard({ order, delay, onMove }) {
         <Row icon={Phone}  text={order.cliente_telefone} />
         <Row icon={MapPin} text={order.endereco} truncate />
         {order.entregador_nome && <Row icon={User} text={order.entregador_nome} accent />}
+        {order.recebido_por && <Row icon={CheckCircle} text={`Recebido por ${order.recebido_por}`} delivered />}
       </div>
       <div style={s.cardFoot}>
         <span style={s.cardTime}>{timeAgo(order.criado_em)}</span>
