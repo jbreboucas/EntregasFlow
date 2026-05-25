@@ -16,7 +16,6 @@ L.Icon.Default.mergeOptions({
 })
 
 const COLORS = ['#00E5A0','#60A5FA','#F59E0B','#F87171','#A78BFA','#FB923C']
-
 const fmtDist = (m) => m >= 1000 ? `${(m/1000).toFixed(1)} km` : `${Math.round(m)} m`
 const fmtTime = (s) => { const m = Math.round(s/60); return m >= 60 ? `${Math.floor(m/60)}h ${m%60}min` : `${m} min` }
 
@@ -27,45 +26,26 @@ const fetchRoute = async (from, to) => {
     const d = await r.json()
     const route = d.routes?.[0]
     if (!route) return null
-    return {
-      points:   route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
-      distance: route.distance,
-      duration: route.duration,
-    }
+    return { points: route.geometry.coordinates.map(([lng,lat]) => [lat,lng]), distance: route.distance, duration: route.duration }
   } catch { return null }
 }
 
-// ─── Web Speech API ────────────────────────────────────────────────────────────
 const speak = (text) => {
   if (!window.speechSynthesis) return
   window.speechSynthesis.cancel()
   const u = new SpeechSynthesisUtterance(text)
-  u.lang  = 'pt-BR'
-  u.rate  = 1.0
-  u.pitch = 1.0
-  // Tenta usar voz em português se disponível
-  const voices = window.speechSynthesis.getVoices()
-  const ptVoice = voices.find(v => v.lang.startsWith('pt')) || null
+  u.lang = 'pt-BR'; u.rate = 1.0
+  const ptVoice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('pt'))
   if (ptVoice) u.voice = ptVoice
   window.speechSynthesis.speak(u)
 }
 
-// Estado da rota
-const ROUTE_IDLE    = 'idle'
-const ROUTE_ACTIVE  = 'active'
-const ROUTE_PAUSED  = 'paused'
+const ROUTE_IDLE = 'idle', ROUTE_ACTIVE = 'active', ROUTE_PAUSED = 'paused'
 
 function makeStopIcon(num, color, active) {
   const size = active ? 40 : 32
   return L.divIcon({
-    html: `<div style="
-      width:${size}px;height:${size}px;
-      background:${color};border:${active ? 3 : 2}px solid #fff;border-radius:50%;
-      display:flex;align-items:center;justify-content:center;
-      box-shadow:${active ? `0 0 0 4px ${color}44,0 4px 14px rgba(0,0,0,0.45)` : '0 2px 6px rgba(0,0,0,0.3)'};
-      font-family:Outfit,sans-serif;font-weight:900;font-size:${active ? 14 : 12}px;color:#080D1A;cursor:pointer;">
-      ${num}
-    </div>`,
+    html: `<div style="width:${size}px;height:${size}px;background:${color};border:${active?3:2}px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:${active?`0 0 0 4px ${color}44,0 4px 14px rgba(0,0,0,0.45)`:'0 2px 6px rgba(0,0,0,0.3)'};font-family:Outfit,sans-serif;font-weight:900;font-size:${active?14:12}px;color:#080D1A;cursor:pointer;">${num}</div>`,
     iconSize:[size,size], iconAnchor:[size/2,size/2], className:'',
   })
 }
@@ -75,17 +55,16 @@ export default function MapView() {
   const navigate = useNavigate()
   const { orders, setOrders } = useOrders()
 
-  const [pedidos,      setPedidos]      = useState([])
-  const [order,        setOrder]        = useState([])  // índices da ordem atual
-  const [activeIdx,    setActiveIdx]    = useState(0)
-  const [gpsPos,       setGpsPos]       = useState(null)
-  const [gpsReady,     setGpsReady]     = useState(false)
-  const [routeData,    setRouteData]    = useState([])
-  const [loadingIdx,   setLoadingIdx]   = useState([])
-  const [routeState,   setRouteState]   = useState(ROUTE_IDLE)
-  const [showReorder,  setShowReorder]  = useState(false)
-  const [dragIdx,      setDragIdx]      = useState(null)
-  const [dragOverIdx,  setDragOverIdx]  = useState(null)
+  const [pedidos,     setPedidos]     = useState([])
+  const [order,       setOrder]       = useState([])
+  const [activeIdx,   setActiveIdx]   = useState(0)
+  const [gpsPos,      setGpsPos]      = useState(null)
+  const [gpsReady,    setGpsReady]    = useState(false)
+  const [routeData,   setRouteData]   = useState([])
+  const [loadingIdx,  setLoadingIdx]  = useState([])
+  const [routeState,  setRouteState]  = useState(ROUTE_IDLE)
+  const [showReorder, setShowReorder] = useState(false)
+  const [dragOver,    setDragOver]    = useState(null)
 
   const mapRef     = useRef(null)
   const mapInst    = useRef(null)
@@ -94,20 +73,20 @@ export default function MapView() {
   const stopMkrs   = useRef([])
   const origin     = useRef(null)
   const routeBuilt = useRef(false)
+  const dragSrc    = useRef(null)      // índice de origem do drag (touch e mouse)
+  const listRef    = useRef(null)      // ref da lista de reordenação
 
-  // Pedidos ordenados pela ordem atual
   const orderedPedidos = order.map(i => pedidos[i]).filter(Boolean)
 
   // ── Resolve pedidos ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ids) return
     const idList = ids.split(',').filter(Boolean)
-    const fromCtx = idList.map(id => orders.find(o => o.id === id)).filter(Boolean)
     const resolve = (all) => {
       const found = idList.map(id => all.find(o => o.id === id)).filter(Boolean)
-      setPedidos(found)
-      setOrder(found.map((_, i) => i))
+      setPedidos(found); setOrder(found.map((_,i) => i))
     }
+    const fromCtx = idList.map(id => orders.find(o => o.id === id)).filter(Boolean)
     if (fromCtx.length === idList.length) resolve(orders)
     else getPedidos().then(({ data }) => { if (data) { setOrders(data); resolve(data) } })
   }, [ids])
@@ -115,11 +94,7 @@ export default function MapView() {
   // ── Mapa ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (mapInst.current || !mapRef.current || pedidos.length === 0) return
-    const first = pedidos[0]
-    const map = L.map(mapRef.current, {
-      center: [first.lat || -3.7317, first.lng || -38.5267],
-      zoom: 13, zoomControl: false,
-    })
+    const map = L.map(mapRef.current, { center:[pedidos[0].lat||-3.7317, pedidos[0].lng||-38.5267], zoom:13, zoomControl:false })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map)
     L.control.zoom({ position:'bottomright' }).addTo(map)
     mapInst.current = map
@@ -130,166 +105,144 @@ export default function MapView() {
   useEffect(() => {
     if (!navigator.geolocation) { setGpsReady(true); return }
     const wid = navigator.geolocation.watchPosition(
-      pos => { setGpsPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setGpsReady(true) },
+      pos => { setGpsPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsReady(true) },
       () => setGpsReady(true),
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      { enableHighAccuracy:true, maximumAge:5000, timeout:10000 }
     )
     const t = setTimeout(() => setGpsReady(true), 4000)
     return () => { navigator.geolocation.clearWatch(wid); clearTimeout(t) }
   }, [])
 
-  // ── Marcador do entregador ────────────────────────────────────────────────────
+  // ── Marcador GPS ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!mapInst.current || !gpsPos) return
-    const { lat, lng } = gpsPos
-    if (myMkr.current) { myMkr.current.setLatLng([lat, lng]); return }
-    myMkr.current = L.marker([lat, lng], {
-      icon: L.divIcon({
-        html: `<div style="width:20px;height:20px;background:#60A5FA;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 5px rgba(96,165,250,0.25);"></div>`,
-        iconSize:[20,20], iconAnchor:[10,10], className:'',
-      }), zIndexOffset:2000,
-    }).addTo(mapInst.current).bindTooltip('Você', { direction:'top' })
+    const {lat,lng} = gpsPos
+    if (myMkr.current) { myMkr.current.setLatLng([lat,lng]); return }
+    myMkr.current = L.marker([lat,lng], { icon: L.divIcon({
+      html:`<div style="width:20px;height:20px;background:#60A5FA;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 5px rgba(96,165,250,0.25);"></div>`,
+      iconSize:[20,20], iconAnchor:[10,10], className:'',
+    }), zIndexOffset:2000 }).addTo(mapInst.current)
   }, [gpsPos])
 
-  // ── Desenha rotas ─────────────────────────────────────────────────────────────
+  // ── Build rotas ───────────────────────────────────────────────────────────────
   const buildRoutes = useCallback(async (pos) => {
     if (!mapInst.current || pedidos.length === 0) return
-
-    routeLines.current.forEach(l => l?.remove())
-    stopMkrs.current.forEach(m => m?.remove())
+    routeLines.current.forEach(l => l?.remove()); stopMkrs.current.forEach(m => m?.remove())
     routeLines.current = new Array(pedidos.length).fill(null)
     stopMkrs.current   = new Array(pedidos.length).fill(null)
-
-    const from = pos || {
-      lat: (pedidos[0].lat || -3.7317) - 0.01,
-      lng: (pedidos[0].lng || -38.5267) + 0.008,
-    }
+    const from = pos || { lat:(pedidos[0].lat||-3.7317)-0.01, lng:(pedidos[0].lng||-38.5267)+0.008 }
     origin.current = from
-
-    // Marcadores por ORDEM atual
-    orderedPedidos.forEach((ped, seqIdx) => {
-      const realIdx = pedidos.indexOf(ped)
-      const color = COLORS[seqIdx % COLORS.length]
-      const isActive = seqIdx === activeIdx
-      const mkr = L.marker([ped.lat || -3.7317, ped.lng || -38.5267], {
-        icon: makeStopIcon(seqIdx + 1, color, isActive),
-      }).addTo(mapInst.current).on('click', () => selectStop(seqIdx))
-      stopMkrs.current[realIdx] = mkr
+    const ordered = order.map(i => pedidos[i]).filter(Boolean)
+    ordered.forEach((ped, seqIdx) => {
+      const ri  = pedidos.indexOf(ped)
+      const col = COLORS[seqIdx%COLORS.length]
+      const mkr = L.marker([ped.lat||-3.7317, ped.lng||-38.5267], { icon: makeStopIcon(seqIdx+1, col, seqIdx===activeIdx) })
+        .addTo(mapInst.current).on('click', () => selectStop(seqIdx))
+      stopMkrs.current[ri] = mkr
     })
-
-    // Rotas em paralelo
-    const newRouteData = new Array(pedidos.length).fill(null)
-    setLoadingIdx(pedidos.map((_, i) => i))
-
-    orderedPedidos.forEach(async (ped, seqIdx) => {
-      const realIdx = pedidos.indexOf(ped)
-      const to = { lat: ped.lat || -3.7317, lng: ped.lng || -38.5267 }
-      const result = await fetchRoute(from, to)
-      if (result && mapInst.current) {
-        const color = COLORS[seqIdx % COLORS.length]
-        const isActive = seqIdx === activeIdx
-        const line = L.polyline(result.points, {
-          color, weight: isActive ? 6 : 3, opacity: isActive ? 0.95 : 0.45,
-          dashArray: isActive ? null : '8,6',
-        }).addTo(mapInst.current)
-        routeLines.current[realIdx] = line
-        newRouteData[realIdx] = { distance: result.distance, duration: result.duration }
-        setRouteData([...newRouteData])
+    const newRD = new Array(pedidos.length).fill(null)
+    setLoadingIdx(pedidos.map((_,i)=>i))
+    ordered.forEach(async (ped, seqIdx) => {
+      const ri  = pedidos.indexOf(ped)
+      const res = await fetchRoute(from, { lat:ped.lat||-3.7317, lng:ped.lng||-38.5267 })
+      if (res && mapInst.current) {
+        const col = COLORS[seqIdx%COLORS.length]
+        const line = L.polyline(res.points, { color:col, weight:seqIdx===activeIdx?6:3, opacity:seqIdx===activeIdx?0.95:0.45, dashArray:seqIdx===activeIdx?null:'8,6' }).addTo(mapInst.current)
+        routeLines.current[ri] = line
+        newRD[ri] = { distance:res.distance, duration:res.duration }
+        setRouteData([...newRD])
       }
-      setLoadingIdx(prev => prev.filter(x => x !== realIdx))
+      setLoadingIdx(prev => prev.filter(x => x !== ri))
     })
-
-    const allPts = [[from.lat, from.lng], ...pedidos.map(o => [o.lat || -3.7317, o.lng || -38.5267])]
+    const allPts = [[from.lat,from.lng], ...pedidos.map(o=>[o.lat||-3.7317,o.lng||-38.5267])]
     mapInst.current.fitBounds(L.latLngBounds(allPts), { padding:[60,60] })
-  }, [pedidos, orderedPedidos, activeIdx])
+  }, [pedidos, order, activeIdx])
 
   useEffect(() => {
-    if (!mapInst.current || pedidos.length === 0 || routeBuilt.current) return
+    if (!mapInst.current || pedidos.length===0 || routeBuilt.current) return
     routeBuilt.current = true
     if (gpsPos) buildRoutes(gpsPos)
-    else { const t = setTimeout(() => buildRoutes(null), 2000); return () => clearTimeout(t) }
+    else { const t = setTimeout(()=>buildRoutes(null),2000); return ()=>clearTimeout(t) }
   }, [mapInst.current, pedidos, gpsPos])
 
-  // ── Seleciona parada ──────────────────────────────────────────────────────────
   const selectStop = (seqIdx) => {
     setActiveIdx(seqIdx)
-    const ped = orderedPedidos[seqIdx]
+    const ordered = order.map(i=>pedidos[i]).filter(Boolean)
+    const ped = ordered[seqIdx]
     if (!ped || !mapInst.current) return
-
-    // Atualiza visuais
-    orderedPedidos.forEach((p, i) => {
-      const realIdx = pedidos.indexOf(p)
-      const line = routeLines.current[realIdx]
-      const mkr  = stopMkrs.current[realIdx]
-      if (line) line.setStyle({ weight: i === seqIdx ? 6 : 3, opacity: i === seqIdx ? 0.95 : 0.45, dashArray: i === seqIdx ? null : '8,6' })
-      if (mkr) mkr.setIcon(makeStopIcon(i + 1, COLORS[i % COLORS.length], i === seqIdx))
+    ordered.forEach((p,i) => {
+      const ri = pedidos.indexOf(p)
+      routeLines.current[ri]?.setStyle({ weight:i===seqIdx?6:3, opacity:i===seqIdx?0.95:0.45, dashArray:i===seqIdx?null:'8,6' })
+      stopMkrs.current[ri]?.setIcon(makeStopIcon(i+1, COLORS[i%COLORS.length], i===seqIdx))
     })
-
-    mapInst.current.setView([ped.lat || -3.7317, ped.lng || -38.5267], 15, { animate:true })
-    if (routeState === ROUTE_ACTIVE) {
-      speak(`Parada ${seqIdx + 1}: ${ped.cliente_nome || ped.endereco}`)
-    }
+    mapInst.current.setView([ped.lat||-3.7317, ped.lng||-38.5267], 15, { animate:true })
+    if (routeState===ROUTE_ACTIVE) speak(`Parada ${seqIdx+1}: ${ped.cliente_nome||ped.endereco}`)
   }
 
-  const centerOnMe = () => {
-    if (!gpsPos || !mapInst.current) return
-    mapInst.current.setView([gpsPos.lat, gpsPos.lng], 16, { animate:true })
-  }
+  const centerOnMe = () => { if (gpsPos && mapInst.current) mapInst.current.setView([gpsPos.lat,gpsPos.lng],16,{animate:true}) }
 
-  // ── Controles de rota ─────────────────────────────────────────────────────────
+  // ── Controles voz ─────────────────────────────────────────────────────────────
   const startRoute = () => {
     setRouteState(ROUTE_ACTIVE)
     const ped = orderedPedidos[activeIdx]
-    speak(`Rota iniciada. ${orderedPedidos.length} entrega${orderedPedidos.length > 1 ? 's' : ''} programada${orderedPedidos.length > 1 ? 's' : ''}. Primeira parada: ${ped?.cliente_nome || ped?.endereco || 'destino'}`)
+    speak(`Rota iniciada. ${orderedPedidos.length} entrega${orderedPedidos.length>1?'s':''} programada${orderedPedidos.length>1?'s':''}. Primeira parada: ${ped?.cliente_nome||ped?.endereco||'destino'}`)
+  }
+  const pauseRoute  = () => { setRouteState(ROUTE_PAUSED);  speak('Rota pausada.') }
+  const resumeRoute = () => { setRouteState(ROUTE_ACTIVE);  speak('Rota retomada.') }
+  const endRoute    = () => { setRouteState(ROUTE_IDLE); speak('Rota finalizada. Bom trabalho!'); setTimeout(()=>navigate('/courier'),2500) }
+
+  // ── Drag reorder — MOUSE (desktop) ───────────────────────────────────────────
+  const onDragStart = (e, idx) => { dragSrc.current = idx; e.dataTransfer.effectAllowed='move' }
+  const onDragOver  = (e, idx) => { e.preventDefault(); setDragOver(idx) }
+  const onDrop      = (e, idx) => {
+    e.preventDefault(); setDragOver(null)
+    if (dragSrc.current === null || dragSrc.current === idx) { dragSrc.current=null; return }
+    applyReorder(dragSrc.current, idx)
+    dragSrc.current = null
   }
 
-  const pauseRoute = () => {
-    setRouteState(ROUTE_PAUSED)
-    speak('Rota pausada.')
+  // ── Touch reorder — MOBILE ────────────────────────────────────────────────────
+  const touchY     = useRef(0)
+  const touchSrcIdx = useRef(null)
+
+  const onTouchStart = (e, idx) => {
+    touchSrcIdx.current = idx
+    touchY.current = e.touches[0].clientY
   }
 
-  const resumeRoute = () => {
-    setRouteState(ROUTE_ACTIVE)
-    speak('Rota retomada.')
+  const onTouchMove = (e) => {
+    e.preventDefault()  // impede scroll da página durante drag
+    if (touchSrcIdx.current === null || !listRef.current) return
+    const y = e.touches[0].clientY
+    const items = listRef.current.querySelectorAll('[data-reorder-item]')
+    let targetIdx = null
+    items.forEach((el, i) => {
+      const rect = el.getBoundingClientRect()
+      if (y >= rect.top && y <= rect.bottom) targetIdx = i
+    })
+    if (targetIdx !== null && targetIdx !== touchSrcIdx.current) setDragOver(targetIdx)
   }
 
-  const endRoute = () => {
-    setRouteState(ROUTE_IDLE)
-    speak('Rota finalizada. Bom trabalho!')
-    setTimeout(() => navigate('/courier'), 2500)
+  const onTouchEnd = () => {
+    if (touchSrcIdx.current !== null && dragOver !== null && dragOver !== touchSrcIdx.current) {
+      applyReorder(touchSrcIdx.current, dragOver)
+    }
+    touchSrcIdx.current = null; setDragOver(null)
   }
 
-  // ── Reordenação drag ──────────────────────────────────────────────────────────
-  const onDragStart = (idx) => setDragIdx(idx)
-  const onDragOver  = (e, idx) => { e.preventDefault(); setDragOverIdx(idx) }
-  const onDrop      = (idx) => {
-    if (dragIdx === null || dragIdx === idx) { setDragIdx(null); setDragOverIdx(null); return }
+  const applyReorder = (fromIdx, toIdx) => {
     const newOrder = [...order]
-    const [moved]  = newOrder.splice(dragIdx, 1)
-    newOrder.splice(idx, 0, moved)
-    setOrder(newOrder)
-    setDragIdx(null); setDragOverIdx(null)
-    setActiveIdx(0)
+    const [moved]  = newOrder.splice(fromIdx, 1)
+    newOrder.splice(toIdx, 0, moved)
+    setOrder(newOrder); setActiveIdx(0)
     routeBuilt.current = false
-    // Recalcula rotas com nova ordem
-    setTimeout(() => {
-      routeBuilt.current = true
-      buildRoutes(gpsPos || origin.current)
-    }, 100)
-    speak(`Ordem atualizada. Parada 1 agora é ${pedidos[newOrder[0]]?.cliente_nome || pedidos[newOrder[0]]?.endereco}`)
+    setTimeout(() => { routeBuilt.current = true; buildRoutes(gpsPos||origin.current) }, 100)
+    speak(`Ordem atualizada. Parada 1: ${pedidos[newOrder[0]]?.cliente_nome||pedidos[newOrder[0]]?.endereco}`)
   }
 
-  // Touch drag (mobile)
-  const touchSrc  = useRef(null)
-  const onTouchStart = (idx) => { touchSrc.current = idx }
-  const onTouchEnd   = (idx) => {
-    if (touchSrc.current !== null && touchSrc.current !== idx) onDrop(idx)
-    touchSrc.current = null; setDragOverIdx(null)
-  }
-
-  const currentOrder  = orderedPedidos[activeIdx]
-  const currentRoute  = currentOrder ? routeData[pedidos.indexOf(currentOrder)] : null
-  const stillLoading  = loadingIdx.length > 0
+  const currentOrder = orderedPedidos[activeIdx]
+  const currentRoute = currentOrder ? routeData[pedidos.indexOf(currentOrder)] : null
+  const stillLoading = loadingIdx.length > 0
 
   return (
     <div style={s.page}>
@@ -300,188 +253,165 @@ export default function MapView() {
         <ArrowLeft size={16} /> Voltar
       </button>
 
-      {/* Centralizar */}
+      {/* GPS */}
       <button style={s.locateBtn} onClick={centerOnMe}>
         <Locate size={18} color={gpsPos ? 'var(--accent)' : 'var(--text-3)'} />
       </button>
 
-      {/* Badge de distância */}
+      {/* Badge distância / loading */}
       {(stillLoading || currentRoute) && (
         <div style={s.badge}>
           {stillLoading
-            ? <><div style={s.spinner} /> Calculando rotas…</>
-            : <><div style={{ width:10, height:10, borderRadius:'50%', background: COLORS[activeIdx % COLORS.length] }} />
-                <span style={{ fontWeight:700, color: COLORS[activeIdx % COLORS.length] }}>{fmtDist(currentRoute.distance)}</span>
-                <span style={{ color:'var(--text-3)' }}>·</span>
-                <span style={{ color:'var(--text-2)' }}>{fmtTime(currentRoute.duration)}</span>
+            ? <><div style={s.spinner}/>Calculando rotas…</>
+            : <><div style={{width:10,height:10,borderRadius:'50%',background:COLORS[activeIdx%COLORS.length]}}/>
+                <span style={{fontWeight:700,color:COLORS[activeIdx%COLORS.length]}}>{fmtDist(currentRoute.distance)}</span>
+                <span style={{color:'var(--text-3)'}}>·</span>
+                <span style={{color:'var(--text-2)'}}>{fmtTime(currentRoute.duration)}</span>
               </>
           }
         </div>
       )}
 
-      {/* Status da rota */}
+      {/* Estado da rota */}
       {routeState !== ROUTE_IDLE && (
-        <div style={{ ...s.routeStateBadge, background: routeState === ROUTE_ACTIVE ? 'rgba(0,229,160,0.15)' : 'rgba(245,158,11,0.15)', borderColor: routeState === ROUTE_ACTIVE ? 'var(--accent-border)' : 'rgba(245,158,11,0.3)' }}>
-          <div style={{ width:8, height:8, borderRadius:'50%', background: routeState === ROUTE_ACTIVE ? 'var(--accent)' : 'var(--pending)', animation: routeState === ROUTE_ACTIVE ? 'pulseDot 1.5s infinite' : 'none' }} />
-          <span style={{ fontSize:12, fontWeight:700, color: routeState === ROUTE_ACTIVE ? 'var(--accent)' : 'var(--pending)' }}>
-            {routeState === ROUTE_ACTIVE ? '● Em andamento' : '⏸ Pausada'}
+        <div style={{...s.stateBadge, background:routeState===ROUTE_ACTIVE?'rgba(0,229,160,0.15)':'rgba(245,158,11,0.15)', borderColor:routeState===ROUTE_ACTIVE?'var(--accent-border)':'rgba(245,158,11,0.3)'}}>
+          <div style={{width:8,height:8,borderRadius:'50%',background:routeState===ROUTE_ACTIVE?'var(--accent)':'var(--pending)',animation:routeState===ROUTE_ACTIVE?'pulseDot 1.5s infinite':'none'}}/>
+          <span style={{fontSize:12,fontWeight:700,color:routeState===ROUTE_ACTIVE?'var(--accent)':'var(--pending)'}}>
+            {routeState===ROUTE_ACTIVE?'Em andamento':'Pausada'}
           </span>
         </div>
       )}
 
-      {/* Seletor de paradas */}
-      {orderedPedidos.length > 1 && (
-        <div style={s.stopSelector}>
-          {orderedPedidos.map((_, i) => (
-            <button key={i} style={{
-              ...s.stopChip,
-              background: i === activeIdx ? COLORS[i % COLORS.length] : 'var(--bg-3)',
-              color:       i === activeIdx ? '#080D1A' : 'var(--text-3)',
-              border:      `1px solid ${i === activeIdx ? COLORS[i % COLORS.length] : 'var(--border)'}`,
-              fontWeight:  i === activeIdx ? 800 : 500,
-            }} onClick={() => selectStop(i)}>
-              {i + 1}
-            </button>
-          ))}
-          <button style={s.reorderBtn} onClick={() => setShowReorder(v => !v)}>
-            <GripVertical size={14} />
-          </button>
-        </div>
-      )}
-
-
-
-      {/* ── Bottom sheet ── */}
+      {/* ── Bottom sheet ─────────────────────────────────────────────────────── */}
       <div style={s.sheet}>
-        <div style={s.handle} />
+        <div style={s.handle}/>
 
-        {/* Painel de reordenação — dentro do sheet */}
+        {/* Painel de reordenação — dentro do sheet, aparece quando showReorder */}
         {showReorder && orderedPedidos.length > 1 && (
-          <div style={s.reorderPanel}>
-            <div style={{ ...s.reorderHead, padding:'10px 14px' }}>
-              <span style={{ fontSize:13, fontWeight:700, color:'var(--text-1)' }}>Reordenar entregas</span>
-              <button style={s.closeReorder} onClick={() => setShowReorder(false)}>✕</button>
+          <div style={s.reorderWrap}>
+            <div style={s.reorderHead}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--text-1)'}}>Reordenar entregas</span>
+              <button style={s.closeBtn} onClick={()=>setShowReorder(false)}>✕</button>
             </div>
-            <p style={{ fontSize:11, color:'var(--text-3)', padding:'4px 14px 8px', margin:0 }}>Arraste para mudar a ordem</p>
-            {order.map((realIdx, seqIdx) => {
-              const ped   = pedidos[realIdx]
-              const color = COLORS[seqIdx % COLORS.length]
-              const isDragTarget = dragOverIdx === seqIdx
-              return (
-                <div key={realIdx}
-                  draggable
-                  onDragStart={() => onDragStart(seqIdx)}
-                  onDragOver={e => onDragOver(e, seqIdx)}
-                  onDrop={() => onDrop(seqIdx)}
-                  onDragEnd={() => { setDragIdx(null); setDragOverIdx(null) }}
-                  onTouchStart={() => onTouchStart(seqIdx)}
-                  onTouchEnd={() => onTouchEnd(seqIdx)}
-                  style={{
-                    ...s.reorderItem,
-                    background:  isDragTarget ? 'var(--accent-dim)' : dragIdx === seqIdx ? 'var(--bg-2)' : 'transparent',
-                    borderColor: isDragTarget ? 'var(--accent)' : 'transparent',
-                    opacity:     dragIdx === seqIdx ? 0.45 : 1,
-                    margin: '2px 8px',
-                  }}>
-                  <div style={{ ...s.reorderNum, background: color }}>{seqIdx + 1}</div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:600, color:'var(--text-1)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {ped?.cliente_nome || 'Sem nome'}
+            <p style={{fontSize:11,color:'var(--text-3)',margin:'2px 0 8px',paddingLeft:2}}>Segure e arraste para mudar a ordem</p>
+            {/* Lista touch-friendly */}
+            <div
+              ref={listRef}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+              style={{display:'flex',flexDirection:'column',gap:6,touchAction:'none'}}
+            >
+              {order.map((realIdx, seqIdx) => {
+                const ped   = pedidos[realIdx]
+                const color = COLORS[seqIdx % COLORS.length]
+                return (
+                  <div
+                    key={realIdx}
+                    data-reorder-item
+                    draggable
+                    onDragStart={e => onDragStart(e, seqIdx)}
+                    onDragOver={e => onDragOver(e, seqIdx)}
+                    onDrop={e => onDrop(e, seqIdx)}
+                    onDragEnd={() => { dragSrc.current=null; setDragOver(null) }}
+                    onTouchStart={e => onTouchStart(e, seqIdx)}
+                    style={{
+                      display:'flex', alignItems:'center', gap:10,
+                      padding:'10px 12px', borderRadius:10,
+                      background: dragOver===seqIdx ? 'var(--accent-dim)' : 'var(--bg-3)',
+                      border:`1px solid ${dragOver===seqIdx ? 'var(--accent)' : 'var(--border)'}`,
+                      opacity: dragSrc.current===seqIdx ? 0.4 : 1,
+                      transition:'background 0.15s, border-color 0.15s',
+                      userSelect:'none', WebkitUserSelect:'none',
+                    }}>
+                    {/* Número colorido */}
+                    <div style={{width:30,height:30,borderRadius:'50%',background:color,color:'#080D1A',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,flexShrink:0}}>
+                      {seqIdx+1}
                     </div>
-                    <div style={{ fontSize:11, color:'var(--text-3)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginTop:1 }}>
-                      {ped?.endereco}
+                    {/* Textos */}
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600,color:'var(--text-1)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                        {ped?.cliente_nome || 'Sem nome'}
+                      </div>
+                      <div style={{fontSize:11,color:'var(--text-3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',marginTop:1}}>
+                        {ped?.endereco}
+                      </div>
+                    </div>
+                    {/* Handle */}
+                    <div style={{padding:'4px 2px',cursor:'grab',color:'var(--text-3)',flexShrink:0,touchAction:'none'}}>
+                      <GripVertical size={18}/>
                     </div>
                   </div>
-                  <GripVertical size={16} color="var(--text-3)" style={{ flexShrink:0, cursor:'grab' }} />
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         )}
 
         {/* Navegação entre paradas */}
-        {orderedPedidos.length > 1 && (
+        {orderedPedidos.length > 1 && !showReorder && (
           <div style={s.stopNav}>
-            <button style={{ ...s.navBtn, opacity: activeIdx === 0 ? 0.3 : 1 }}
-              disabled={activeIdx === 0} onClick={() => selectStop(activeIdx - 1)}>
-              <ChevronLeft size={18} />
+            <button style={{...s.navBtn, opacity:activeIdx===0?0.3:1}} disabled={activeIdx===0} onClick={()=>selectStop(activeIdx-1)}>
+              <ChevronLeft size={18}/>
             </button>
-            <div style={{ textAlign:'center', flex:1 }}>
-              <div style={{ fontSize:12, fontWeight:600, color:'var(--text-2)' }}>Parada {activeIdx+1} de {orderedPedidos.length}</div>
-              <div style={{ display:'flex', justifyContent:'center', gap:5, marginTop:5 }}>
-                {orderedPedidos.map((_, i) => (
-                  <button key={i} onClick={() => selectStop(i)} style={{
-                    width: i === activeIdx ? 20 : 7, height:7, borderRadius:4,
-                    background: i === activeIdx ? COLORS[i % COLORS.length] : 'var(--border-2)',
-                    transition:'all 0.25s', cursor:'pointer', border:'none', padding:0,
-                  }} />
+            <div style={{textAlign:'center',flex:1}}>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--text-2)'}}>Parada {activeIdx+1} de {orderedPedidos.length}</div>
+              <div style={{display:'flex',justifyContent:'center',gap:5,marginTop:5}}>
+                {orderedPedidos.map((_,i)=>(
+                  <button key={i} onClick={()=>selectStop(i)} style={{width:i===activeIdx?20:7,height:7,borderRadius:4,background:i===activeIdx?COLORS[i%COLORS.length]:'var(--border-2)',transition:'all 0.25s',cursor:'pointer',border:'none',padding:0}}/>
                 ))}
               </div>
             </div>
-            <button style={{ ...s.navBtn, opacity: activeIdx === orderedPedidos.length-1 ? 0.3 : 1 }}
-              disabled={activeIdx === orderedPedidos.length-1} onClick={() => selectStop(activeIdx + 1)}>
-              <ChevronRight size={18} />
+            <button style={{...s.navBtn, opacity:activeIdx===orderedPedidos.length-1?0.3:1}} disabled={activeIdx===orderedPedidos.length-1} onClick={()=>selectStop(activeIdx+1)}>
+              <ChevronRight size={18}/>
+            </button>
+            {/* Botão reordenar dentro da navegação */}
+            <button style={s.reorderToggle} onClick={()=>setShowReorder(true)} title="Reordenar">
+              <GripVertical size={15}/>
             </button>
           </div>
         )}
 
-        {currentOrder && (
+        {/* Info da parada atual */}
+        {currentOrder && !showReorder && (
           <>
             <div style={s.sheetRow}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-3)', marginBottom:3 }}>#{currentOrder.id}</div>
-                <div style={{ fontSize:17, fontWeight:800, color:'var(--text-1)', letterSpacing:'-0.3px' }}>{currentOrder.cliente_nome || 'Sem nome'}</div>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--text-3)',marginBottom:3}}>#{currentOrder.id}</div>
+                <div style={{fontSize:17,fontWeight:800,color:'var(--text-1)',letterSpacing:'-0.3px'}}>{currentOrder.cliente_nome||'Sem nome'}</div>
               </div>
-              <div style={{ ...s.stopIconBadge, background: COLORS[activeIdx%COLORS.length]+'22', border:`1px solid ${COLORS[activeIdx%COLORS.length]}44` }}>
-                <Navigation size={18} color={COLORS[activeIdx%COLORS.length]} />
+              <div style={{...s.stopBadge,background:COLORS[activeIdx%COLORS.length]+'22',border:`1px solid ${COLORS[activeIdx%COLORS.length]}44`}}>
+                <Navigation size={18} color={COLORS[activeIdx%COLORS.length]}/>
               </div>
             </div>
-
-            <div style={{ marginBottom:12 }}>
-              {currentOrder.cliente_telefone && <InfoRow icon={Phone} text={currentOrder.cliente_telefone} />}
-              <InfoRow icon={MapPin} text={currentOrder.endereco} />
+            <div style={{marginBottom:12}}>
+              {currentOrder.cliente_telefone && <InfoRow icon={Phone} text={currentOrder.cliente_telefone}/>}
+              <InfoRow icon={MapPin} text={currentOrder.endereco}/>
             </div>
-
-            {/* Ações da entrega */}
             <div style={s.deliveryBtns}>
               <a href={`tel:${currentOrder.cliente_telefone}`} style={s.callBtn}>
-                <Phone size={15} /> Ligar
+                <Phone size={15}/> Ligar
               </a>
-              <button style={s.confirmBtn} onClick={() => navigate(`/confirm/${currentOrder.id}`)}>
-                <CheckCircle size={16} /> Confirmar entrega
+              <button style={s.confirmBtn} onClick={()=>navigate(`/confirm/${currentOrder.id}`)}>
+                <CheckCircle size={16}/> Confirmar entrega
               </button>
             </div>
           </>
         )}
 
-        {/* ── Controles de rota ── */}
-        <div style={s.routeControls}>
-          {routeState === ROUTE_IDLE && (
-            <button style={s.startBtn} onClick={startRoute}>
-              <Play size={16} /> Iniciar rota
-            </button>
-          )}
-          {routeState === ROUTE_ACTIVE && (
-            <>
-              <button style={s.pauseBtn} onClick={pauseRoute}>
-                <Pause size={16} /> Pausar
-              </button>
-              <button style={s.endBtn} onClick={endRoute}>
-                <StopCircle size={16} /> Finalizar rota
-              </button>
-            </>
-          )}
-          {routeState === ROUTE_PAUSED && (
-            <>
-              <button style={s.startBtn} onClick={resumeRoute}>
-                <Play size={16} /> Retomar
-              </button>
-              <button style={s.endBtn} onClick={endRoute}>
-                <StopCircle size={16} /> Finalizar rota
-              </button>
-            </>
-          )}
-        </div>
+        {/* Controles de rota */}
+        {!showReorder && (
+          <div style={s.routeControls}>
+            {routeState===ROUTE_IDLE   && <button style={s.startBtn} onClick={startRoute}><Play size={16}/> Iniciar rota</button>}
+            {routeState===ROUTE_ACTIVE && <>
+              <button style={s.pauseBtn} onClick={pauseRoute}><Pause size={16}/> Pausar</button>
+              <button style={s.endBtn}   onClick={endRoute}><StopCircle size={16}/> Finalizar</button>
+            </>}
+            {routeState===ROUTE_PAUSED && <>
+              <button style={s.startBtn} onClick={resumeRoute}><Play size={16}/> Retomar</button>
+              <button style={s.endBtn}   onClick={endRoute}><StopCircle size={16}/> Finalizar</button>
+            </>}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -489,46 +419,36 @@ export default function MapView() {
 
 function InfoRow({ icon:Icon, text }) {
   return (
-    <div style={{ display:'flex', alignItems:'flex-start', gap:8, marginBottom:5 }}>
-      <Icon size={14} color="var(--text-3)" style={{ marginTop:1, flexShrink:0 }} />
-      <span style={{ fontSize:13, color:'var(--text-2)', lineHeight:1.5 }}>{text}</span>
+    <div style={{display:'flex',alignItems:'flex-start',gap:8,marginBottom:5}}>
+      <Icon size={14} color="var(--text-3)" style={{marginTop:1,flexShrink:0}}/>
+      <span style={{fontSize:13,color:'var(--text-2)',lineHeight:1.5}}>{text}</span>
     </div>
   )
 }
 
 const s = {
-  page:{ position:'fixed', inset:0, display:'flex', flexDirection:'column', background:'var(--bg)' },
-  map:{ flex:1, zIndex:1 },
-  backBtn:{ position:'absolute', top:16, left:16, zIndex:500, display:'flex', alignItems:'center', gap:7, padding:'10px 14px', background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, boxShadow:'var(--shadow)' },
-  locateBtn:{ position:'absolute', top:16, right:16, zIndex:500, width:42, height:42, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'var(--shadow)', cursor:'pointer' },
-  badge:{ position:'absolute', top:70, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:20, padding:'7px 14px', fontSize:12, color:'var(--text-2)', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
-  spinner:{ width:12, height:12, borderRadius:'50%', border:'2px solid var(--accent)', borderTopColor:'transparent', animation:'spin 0.7s linear infinite' },
-  routeStateBadge:{ position:'absolute', top:110, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, borderRadius:20, border:'1px solid', padding:'6px 13px', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
-  stopSelector:{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', zIndex:450, display:'flex', gap:6, background:'rgba(8,13,26,0.88)', backdropFilter:'blur(10px)', border:'1px solid var(--border-2)', borderRadius:40, padding:'7px 10px', boxShadow:'var(--shadow)', flexWrap:'wrap', maxWidth:'90vw', justifyContent:'center' },
-  stopChip:{ width:32, height:32, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, cursor:'pointer', transition:'all 0.2s', flexShrink:0 },
-  reorderBtn:{ width:32, height:32, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg-4)', border:'1px solid var(--border)', color:'var(--text-2)', cursor:'pointer' },
-
-  // Painel de reordenação
-  reorderPanel:{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden', marginBottom:10 },
-  reorderHead:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', borderBottom:'1px solid var(--border)' },
-  closeReorder:{ width:26, height:26, borderRadius:6, background:'var(--bg-3)', border:'1px solid var(--border)', color:'var(--text-2)', fontSize:12, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' },
-  reorderItem:{ display:'flex', alignItems:'center', gap:10, margin:'6px 10px', padding:'10px 12px', borderRadius:10, border:'1px solid', transition:'all 0.15s', cursor:'grab' },
-  reorderNum:{ width:28, height:28, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:900, flexShrink:0 },
-
-  // Bottom sheet
-  sheet:{ background:'var(--bg-2)', borderTop:'1px solid var(--border-2)', borderRadius:'20px 20px 0 0', padding:'12px 18px 24px', zIndex:400, flexShrink:0 },
-  handle:{ width:34, height:3, background:'var(--border-2)', borderRadius:2, margin:'0 auto 14px' },
-  stopNav:{ display:'flex', alignItems:'center', gap:8, marginBottom:14, paddingBottom:14, borderBottom:'1px solid var(--border)' },
-  navBtn:{ width:36, height:36, borderRadius:9, background:'var(--bg-3)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-2)', cursor:'pointer' },
-  sheetRow:{ display:'flex', alignItems:'flex-start', gap:12, marginBottom:10 },
-  stopIconBadge:{ width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  page:      { position:'fixed', inset:0, display:'flex', flexDirection:'column', background:'var(--bg)' },
+  map:       { flex:1, zIndex:1 },
+  backBtn:   { position:'absolute', top:16, left:16, zIndex:500, display:'flex', alignItems:'center', gap:7, padding:'10px 14px', background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, boxShadow:'var(--shadow)' },
+  locateBtn: { position:'absolute', top:16, right:16, zIndex:500, width:42, height:42, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'var(--shadow)', cursor:'pointer' },
+  badge:     { position:'absolute', top:70, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:20, padding:'7px 14px', fontSize:12, color:'var(--text-2)', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
+  spinner:   { width:12, height:12, borderRadius:'50%', border:'2px solid var(--accent)', borderTopColor:'transparent', animation:'spin 0.7s linear infinite' },
+  stateBadge:{ position:'absolute', top:110, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, borderRadius:20, border:'1px solid', padding:'6px 13px', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
+  sheet:     { background:'var(--bg-2)', borderTop:'1px solid var(--border-2)', borderRadius:'20px 20px 0 0', padding:'12px 16px 28px', zIndex:400, flexShrink:0 },
+  handle:    { width:34, height:3, background:'var(--border-2)', borderRadius:2, margin:'0 auto 14px' },
+  reorderWrap:{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:12, padding:'12px 12px 14px', marginBottom:14 },
+  reorderHead:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 },
+  closeBtn:  { width:26, height:26, borderRadius:7, background:'var(--bg-2)', border:'1px solid var(--border)', color:'var(--text-2)', fontSize:12, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' },
+  stopNav:   { display:'flex', alignItems:'center', gap:8, marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' },
+  navBtn:    { width:36, height:36, borderRadius:9, background:'var(--bg-3)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-2)', cursor:'pointer', flexShrink:0 },
+  reorderToggle:{ width:36, height:36, borderRadius:9, background:'var(--bg-3)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-2)', cursor:'pointer', flexShrink:0 },
+  sheetRow:  { display:'flex', alignItems:'flex-start', gap:12, marginBottom:10 },
+  stopBadge: { width:40, height:40, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
   deliveryBtns:{ display:'flex', gap:10, marginBottom:12 },
-  callBtn:{ flex:1, padding:'11px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:7, textDecoration:'none' },
+  callBtn:   { flex:1, padding:'11px 0', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:10, color:'var(--text-1)', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:7, textDecoration:'none' },
   confirmBtn:{ flex:2.5, padding:'11px 0', background:'var(--accent)', borderRadius:10, color:'#080D1A', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:8 },
-
-  // Controles de rota
   routeControls:{ display:'flex', gap:8 },
-  startBtn:{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'12px 0', background:'var(--accent)', color:'#080D1A', borderRadius:10, fontSize:14, fontWeight:800 },
-  pauseBtn:{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'12px 0', background:'var(--pending-bg)', border:'1px solid rgba(245,158,11,0.3)', color:'var(--pending)', borderRadius:10, fontSize:14, fontWeight:700 },
-  endBtn:{   flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'12px 0', background:'var(--danger-bg)', border:'1px solid rgba(248,113,113,0.3)', color:'var(--danger)', borderRadius:10, fontSize:14, fontWeight:700 },
+  startBtn:  { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--accent)', color:'#080D1A', borderRadius:10, fontSize:14, fontWeight:800 },
+  pauseBtn:  { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--pending-bg)', border:'1px solid rgba(245,158,11,0.3)', color:'var(--pending)', borderRadius:10, fontSize:14, fontWeight:700 },
+  endBtn:    { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'13px 0', background:'var(--danger-bg)', border:'1px solid rgba(248,113,113,0.3)', color:'var(--danger)', borderRadius:10, fontSize:14, fontWeight:700 },
 }
