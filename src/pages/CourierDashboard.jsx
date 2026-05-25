@@ -241,7 +241,6 @@ export default function CourierDashboard() {
           </div>
         </div>
       )}
-    </div>
 
       {/* Modal detalhe */}
       {selectedOrder && (
