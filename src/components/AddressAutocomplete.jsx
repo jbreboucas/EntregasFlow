@@ -19,10 +19,18 @@ export default function AddressAutocomplete({ value, onChange, onSelect }) {
   const [loading,     setLoading]     = useState(false)
   const [open,        setOpen]        = useState(false)
   const [highlighted, setHighlighted] = useState(-1)
-  const debounceRef = useRef(null)
-  const abortRef    = useRef(null)
-  const inputRef    = useRef(null)
-  const wrapRef     = useRef(null)
+  const debounceRef  = useRef(null)
+  const abortRef     = useRef(null)
+  const inputRef     = useRef(null)
+  const wrapRef      = useRef(null)
+  const skipSync     = useRef(false)  // evita loop ao selecionar
+
+  // Sincroniza query com value externo (ex: reset do form, modal fecha/abre)
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return }
+    setQuery(value || '')
+    if (!value) { setSuggestions([]); setOpen(false) }
+  }, [value])
 
   useEffect(() => {
     clearTimeout(debounceRef.current)
@@ -55,6 +63,7 @@ export default function AddressAutocomplete({ value, onChange, onSelect }) {
   }, [query])
 
   const select = (item) => {
+    skipSync.current = true  // evita que o useEffect de value resete o query
     setQuery(item.label); setSuggestions([]); setOpen(false)
     onChange(item.label)
     onSelect?.({ address: item.label, lat: item.lat, lng: item.lng })

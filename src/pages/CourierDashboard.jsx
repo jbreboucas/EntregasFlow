@@ -97,9 +97,10 @@ export default function CourierDashboard() {
       setTab('mine')
     } else {
       console.error('Erro ao criar pedido:', error)
+      alert('Erro ao criar pedido: ' + (error?.message || 'tente novamente'))
     }
 
-    setForm({ id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'', localizacao_carro:'' })
+    setForm({ id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'', localizacao_carro:'', data_pedido:'', lat:null, lng:null })
     setShowModal(false)
     setSaving(false)
   }
