@@ -153,7 +153,7 @@ export default function AdminDashboard() {
         <div style={s.hLeft}>
           <div style={s.logoBox}><Package size={17} color="var(--accent)" /></div>
           <div>
-            <div style={s.logoName}>EntregaFlow</div>
+            <div style={s.logoName}>BRLAB.ENTREGAS</div>
             <div style={s.logoSub}>Painel do Administrador</div>
           </div>
         </div>

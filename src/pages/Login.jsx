@@ -35,7 +35,7 @@ export default function Login() {
         <div style={s.brand}>
           <div style={s.brandIcon}><Package size={22} color="var(--accent)" /></div>
           <div>
-            <div style={s.brandName}>EntregaFlow</div>
+            <div style={s.brandName}>BRLAB.ENTREGAS</div>
             <div style={s.brandSub}>Gestão de pedidos e rotas</div>
           </div>
         </div>

@@ -118,7 +118,7 @@ export default function CourierDashboard() {
       <header style={s.header}>
         <div style={s.hLeft}>
           <div style={s.logoBox}><Package size={17} color="var(--accent)" /></div>
-          <span style={s.logoName}>EntregaFlow</span>
+          <span style={s.logoName}>BRLAB.ENTREGAS</span>
         </div>
         <div style={s.hRight}>
           <div style={s.userChip}>
