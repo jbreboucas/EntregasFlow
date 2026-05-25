@@ -75,8 +75,11 @@ export default function MapView() {
   const origin     = useRef(null)
   const routeBuiltFallback = useRef(false)
   const routeBuiltGPS     = useRef(false)
-  const dragSrc    = useRef(null)      // índice de origem do drag (touch e mouse)
-  const listRef    = useRef(null)      // ref da lista de reordenação
+  const dragSrc       = useRef(null)
+  const listRef       = useRef(null)
+  const routePolylines = useRef([])   // coords das rotas [[lat,lng], ...] por pedido
+  const lastRecalcTime = useRef(0)    // timestamp do último recálculo
+  const prevGpsPos     = useRef(null) // última posição GPS processada
 
   const orderedPedidos = order.map(i => pedidos[i]).filter(Boolean)
 
@@ -116,23 +119,91 @@ export default function MapView() {
     return () => { navigator.geolocation.clearWatch(wid); clearTimeout(t) }
   }, [])
 
-  // ── Marcador GPS ─────────────────────────────────────────────────────────────
+  // ── Marcador GPS + detecção de desvio ────────────────────────────────────────
   useEffect(() => {
     if (!mapInst.current || !gpsPos) return
-    const {lat,lng} = gpsPos
-    if (myMkr.current) { myMkr.current.setLatLng([lat,lng]); return }
-    myMkr.current = L.marker([lat,lng], { icon: L.divIcon({
-      html:`<div style="width:20px;height:20px;background:#60A5FA;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 5px rgba(96,165,250,0.25);"></div>`,
-      iconSize:[20,20], iconAnchor:[10,10], className:'',
-    }), zIndexOffset:2000 }).addTo(mapInst.current)
-  }, [gpsPos])
+    const { lat, lng } = gpsPos
+
+    // Atualiza ou cria marcador do entregador
+    if (myMkr.current) {
+      myMkr.current.setLatLng([lat, lng])
+    } else {
+      myMkr.current = L.marker([lat, lng], {
+        icon: L.divIcon({
+          html: `<div style="
+            width:22px;height:22px;
+            background:#60A5FA;border:3px solid #fff;border-radius:50%;
+            box-shadow:0 0 0 6px rgba(96,165,250,0.2);
+            transition:all 0.5s ease;">
+          </div>`,
+          iconSize:[22,22], iconAnchor:[11,11], className:'',
+        }), zIndexOffset:2000
+      }).addTo(mapInst.current)
+    }
+
+    // Centraliza suavemente quando rota está ativa
+    if (routeState === ROUTE_ACTIVE) {
+      mapInst.current.panTo([lat, lng], { animate: true, duration: 0.8 })
+    }
+
+    // ── Detecção de desvio ────────────────────────────────────────────────────
+    if (routeState !== ROUTE_ACTIVE) return          // só verifica com rota ativa
+    if (!routeBuiltGPS.current) return               // aguarda rota GPS estar pronta
+
+    const now = Date.now()
+    if (now - lastRecalcTime.current < 15000) return  // no máximo 1 recálculo a cada 15s
+
+    // Pega a rota da parada atual
+    const currentPed   = orderedPedidos[activeIdx]
+    if (!currentPed) return
+    const currentRealIdx = pedidos.indexOf(currentPed)
+    const routePts       = routePolylines.current[currentRealIdx]
+    if (!routePts || routePts.length === 0) return
+
+    // Calcula distância mínima do ponto GPS até qualquer ponto da rota
+    const R     = 6371000  // raio da Terra em metros
+    const toRad = (d) => d * Math.PI / 180
+    let minDist = Infinity
+
+    for (let i = 0; i < routePts.length - 1; i++) {
+      const [aLat, aLng] = routePts[i]
+      const [bLat, bLng] = routePts[i + 1]
+
+      // Distância simples ponto → segmento de reta (projeção)
+      const dLat = bLat - aLat, dLng = bLng - aLng
+      const t    = Math.max(0, Math.min(1,
+        ((lat - aLat) * dLat + (lng - aLng) * dLng) / (dLat * dLat + dLng * dLng + 1e-10)
+      ))
+      const pLat = aLat + t * dLat, pLng = aLng + t * dLng
+
+      // Distância haversine do GPS até a projeção
+      const dφ   = toRad(lat - pLat), dλ = toRad(lng - pLng)
+      const a    = Math.sin(dφ/2)**2 + Math.cos(toRad(lat)) * Math.cos(toRad(pLat)) * Math.sin(dλ/2)**2
+      const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+      if (dist < minDist) minDist = dist
+    }
+
+    // Se desviou mais de 80 metros → recalcula
+    if (minDist > 80) {
+      lastRecalcTime.current = now
+      routeBuiltGPS.current  = false
+      routeBuiltFallback.current = false
+      speak('Recalculando rota.')
+      setTimeout(() => {
+        routeBuiltGPS.current = true
+        buildRoutes(gpsPos)
+      }, 300)
+    }
+  }, [gpsPos, routeState, activeIdx, orderedPedidos, pedidos, buildRoutes])
 
   // ── Build rotas ───────────────────────────────────────────────────────────────
   const buildRoutes = useCallback(async (pos) => {
     if (!mapInst.current || pedidos.length === 0) return
     routeLines.current.forEach(l => l?.remove()); stopMkrs.current.forEach(m => m?.remove())
-    routeLines.current = new Array(pedidos.length).fill(null)
-    stopMkrs.current   = new Array(pedidos.length).fill(null)
+    routeLines.current  = new Array(pedidos.length).fill(null)
+    stopMkrs.current    = new Array(pedidos.length).fill(null)
+    routePolylines.current = new Array(pedidos.length).fill(null)
     const from = pos || { lat:(pedidos[0].lat||-3.7317)-0.01, lng:(pedidos[0].lng||-38.5267)+0.008 }
     origin.current = from
     const ordered = order.map(i => pedidos[i]).filter(Boolean)
@@ -152,6 +223,7 @@ export default function MapView() {
         const col = COLORS[seqIdx%COLORS.length]
         const line = L.polyline(res.points, { color:col, weight:seqIdx===activeIdx?6:3, opacity:seqIdx===activeIdx?0.95:0.45, dashArray:seqIdx===activeIdx?null:'8,6' }).addTo(mapInst.current)
         routeLines.current[ri] = line
+        routePolylines.current[ri] = res.points  // salva para detecção de desvio
         newRD[ri] = { distance:res.distance, duration:res.duration }
         setRouteData([...newRD])
       }
