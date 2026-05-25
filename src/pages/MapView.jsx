@@ -349,52 +349,55 @@ export default function MapView() {
         </div>
       )}
 
-      {/* ── Painel de reordenação ── */}
-      {showReorder && (
-        <div style={s.reorderPanel} className="fade-up">
-          <div style={s.reorderHead}>
-            <span style={{ fontSize:13, fontWeight:700, color:'var(--text-1)' }}>Reordenar entregas</span>
-            <button style={s.closeReorder} onClick={() => setShowReorder(false)}>✕</button>
-          </div>
-          <p style={{ fontSize:11, color:'var(--text-3)', padding:'0 14px 8px', margin:0 }}>Arraste para mudar a ordem de entrega</p>
-          {order.map((realIdx, seqIdx) => {
-            const ped   = pedidos[realIdx]
-            const color = COLORS[seqIdx % COLORS.length]
-            const isDragTarget = dragOverIdx === seqIdx
-            return (
-              <div key={realIdx}
-                draggable
-                onDragStart={() => onDragStart(seqIdx)}
-                onDragOver={e => onDragOver(e, seqIdx)}
-                onDrop={() => onDrop(seqIdx)}
-                onDragEnd={() => { setDragIdx(null); setDragOverIdx(null) }}
-                onTouchStart={() => onTouchStart(seqIdx)}
-                onTouchEnd={() => onTouchEnd(seqIdx)}
-                style={{
-                  ...s.reorderItem,
-                  background: isDragTarget ? 'var(--accent-dim)' : dragIdx === seqIdx ? 'var(--bg-4)' : 'var(--bg-3)',
-                  borderColor: isDragTarget ? 'var(--accent)' : 'var(--border)',
-                  opacity: dragIdx === seqIdx ? 0.5 : 1,
-                }}>
-                <div style={{ ...s.reorderNum, background: color, color:'#080D1A' }}>{seqIdx + 1}</div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:'var(--text-1)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    {ped?.cliente_nome || 'Sem nome'}
-                  </div>
-                  <div style={{ fontSize:11, color:'var(--text-3)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    {ped?.endereco}
-                  </div>
-                </div>
-                <GripVertical size={16} color="var(--text-3)" style={{ flexShrink:0, cursor:'grab' }} />
-              </div>
-            )
-          })}
-        </div>
-      )}
+
 
       {/* ── Bottom sheet ── */}
       <div style={s.sheet}>
         <div style={s.handle} />
+
+        {/* Painel de reordenação — dentro do sheet */}
+        {showReorder && orderedPedidos.length > 1 && (
+          <div style={s.reorderPanel}>
+            <div style={{ ...s.reorderHead, padding:'10px 14px' }}>
+              <span style={{ fontSize:13, fontWeight:700, color:'var(--text-1)' }}>Reordenar entregas</span>
+              <button style={s.closeReorder} onClick={() => setShowReorder(false)}>✕</button>
+            </div>
+            <p style={{ fontSize:11, color:'var(--text-3)', padding:'4px 14px 8px', margin:0 }}>Arraste para mudar a ordem</p>
+            {order.map((realIdx, seqIdx) => {
+              const ped   = pedidos[realIdx]
+              const color = COLORS[seqIdx % COLORS.length]
+              const isDragTarget = dragOverIdx === seqIdx
+              return (
+                <div key={realIdx}
+                  draggable
+                  onDragStart={() => onDragStart(seqIdx)}
+                  onDragOver={e => onDragOver(e, seqIdx)}
+                  onDrop={() => onDrop(seqIdx)}
+                  onDragEnd={() => { setDragIdx(null); setDragOverIdx(null) }}
+                  onTouchStart={() => onTouchStart(seqIdx)}
+                  onTouchEnd={() => onTouchEnd(seqIdx)}
+                  style={{
+                    ...s.reorderItem,
+                    background:  isDragTarget ? 'var(--accent-dim)' : dragIdx === seqIdx ? 'var(--bg-2)' : 'transparent',
+                    borderColor: isDragTarget ? 'var(--accent)' : 'transparent',
+                    opacity:     dragIdx === seqIdx ? 0.45 : 1,
+                    margin: '2px 8px',
+                  }}>
+                  <div style={{ ...s.reorderNum, background: color }}>{seqIdx + 1}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:'var(--text-1)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {ped?.cliente_nome || 'Sem nome'}
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--text-3)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginTop:1 }}>
+                      {ped?.endereco}
+                    </div>
+                  </div>
+                  <GripVertical size={16} color="var(--text-3)" style={{ flexShrink:0, cursor:'grab' }} />
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {/* Navegação entre paradas */}
         {orderedPedidos.length > 1 && (
@@ -500,13 +503,13 @@ const s = {
   locateBtn:{ position:'absolute', top:16, right:16, zIndex:500, width:42, height:42, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'var(--shadow)', cursor:'pointer' },
   badge:{ position:'absolute', top:70, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:20, padding:'7px 14px', fontSize:12, color:'var(--text-2)', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
   spinner:{ width:12, height:12, borderRadius:'50%', border:'2px solid var(--accent)', borderTopColor:'transparent', animation:'spin 0.7s linear infinite' },
-  routeStateBadge:{ position:'absolute', top:70, right:16, zIndex:500, display:'flex', alignItems:'center', gap:7, borderRadius:20, border:'1px solid', padding:'7px 13px', boxShadow:'var(--shadow)' },
-  stopSelector:{ position:'absolute', bottom:310, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', gap:6, background:'rgba(8,13,26,0.88)', backdropFilter:'blur(10px)', border:'1px solid var(--border-2)', borderRadius:40, padding:'7px 10px', boxShadow:'var(--shadow)', flexWrap:'wrap', maxWidth:'90vw', justifyContent:'center' },
+  routeStateBadge:{ position:'absolute', top:110, left:'50%', transform:'translateX(-50%)', zIndex:500, display:'flex', alignItems:'center', gap:7, borderRadius:20, border:'1px solid', padding:'6px 13px', boxShadow:'var(--shadow)', whiteSpace:'nowrap' },
+  stopSelector:{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', zIndex:450, display:'flex', gap:6, background:'rgba(8,13,26,0.88)', backdropFilter:'blur(10px)', border:'1px solid var(--border-2)', borderRadius:40, padding:'7px 10px', boxShadow:'var(--shadow)', flexWrap:'wrap', maxWidth:'90vw', justifyContent:'center' },
   stopChip:{ width:32, height:32, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, cursor:'pointer', transition:'all 0.2s', flexShrink:0 },
   reorderBtn:{ width:32, height:32, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg-4)', border:'1px solid var(--border)', color:'var(--text-2)', cursor:'pointer' },
 
   // Painel de reordenação
-  reorderPanel:{ position:'absolute', bottom:310, left:'50%', transform:'translateX(-50%)', zIndex:600, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:16, width:'calc(100% - 32px)', maxWidth:420, boxShadow:'var(--shadow)', overflow:'hidden' },
+  reorderPanel:{ background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden', marginBottom:10 },
   reorderHead:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', borderBottom:'1px solid var(--border)' },
   closeReorder:{ width:26, height:26, borderRadius:6, background:'var(--bg-3)', border:'1px solid var(--border)', color:'var(--text-2)', fontSize:12, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' },
   reorderItem:{ display:'flex', alignItems:'center', gap:10, margin:'6px 10px', padding:'10px 12px', borderRadius:10, border:'1px solid', transition:'all 0.15s', cursor:'grab' },

@@ -157,13 +157,15 @@ export default function CourierDashboard() {
 
       {/* Toolbar */}
       <div style={s.toolbar}>
-        <div style={s.tabs}>
+        {/* Linha 1: tabs */}
+        <div style={s.tabsRow}>
           <Tab active={tab==='available'} onClick={() => setTab('available')} label="Disponíveis" count={available.length}  countColor="var(--pending)" />
           <Tab active={tab==='mine'}      onClick={() => setTab('mine')}      label="Em rota"     count={myActive.length}   countColor="var(--in-route)" />
           <Tab active={tab==='done'}      onClick={() => setTab('done')}      label="Entregues"   count={myDone.length}     countColor="var(--delivered)" />
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button style={s.refreshBtn} onClick={handleRefresh} title="Atualizar pedidos" disabled={refreshing}>
+        {/* Linha 2: ações */}
+        <div style={s.actionsRow}>
+          <button style={s.refreshBtn} onClick={handleRefresh} title="Atualizar" disabled={refreshing}>
             <RefreshCw size={14} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
           </button>
           <button style={s.addBtn} onClick={() => setShowModal(true)}>
@@ -312,7 +314,7 @@ function Stat({ icon:Icon, color, value, label }) {
 
 function Tab({ active, onClick, label, count, countColor }) {
   return (
-    <button style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 14px', borderRadius:8, fontSize:13, fontWeight:500, color: active ? 'var(--text-1)' : 'var(--text-3)', background: active ? 'var(--bg-3)' : 'transparent', boxShadow: active ? 'inset 0 0 0 1px var(--border-2)' : 'none' }} onClick={onClick}>
+    <button style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:5, padding:'7px 8px', borderRadius:8, fontSize:12, fontWeight:500, color: active ? 'var(--text-1)' : 'var(--text-3)', background: active ? 'var(--bg-3)' : 'transparent', boxShadow: active ? 'inset 0 0 0 1px var(--border-2)' : 'none' }} onClick={onClick}>
       {label}
       {count > 0 && <span style={{ fontSize:11, fontWeight:700, padding:'1px 6px', borderRadius:10, background:'var(--bg-3)', color: countColor }}>{count}</span>}
     </button>
@@ -394,9 +396,11 @@ const s = {
   routeIcon:{ width:36, height:36, borderRadius:9, background:'rgba(0,229,160,0.15)', border:'1px solid var(--accent-border)', display:'flex', alignItems:'center', justifyContent:'center' },
   routeTitle:{ fontSize:13, fontWeight:700, color:'var(--accent)' },
   routeSub:{ fontSize:11, color:'var(--text-2)', marginTop:1 },
-  toolbar:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 14px', background:'var(--bg-2)', borderBottom:'1px solid var(--border)', flexShrink:0 },
+  toolbar:{ display:'flex', flexDirection:'column', padding:'8px 14px 10px', background:'var(--bg-2)', borderBottom:'1px solid var(--border)', flexShrink:0, gap:8 },
+  tabsRow:{ display:'flex', gap:2 },
+  actionsRow:{ display:'flex', gap:8, alignItems:'center' },
   tabs:{ display:'flex', gap:2 },
-  addBtn:{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:13, fontWeight:700 },
+  addBtn:{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:6, padding:'9px 14px', background:'var(--accent)', color:'#080D1A', borderRadius:'var(--radius-sm)', fontSize:13, fontWeight:700 },
   refreshBtn:{ display:'flex', alignItems:'center', justifyContent:'center', padding:'8px', background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-2)', cursor:'pointer' },
   list:{ flex:1, overflowY:'auto', padding:'10px 14px', display:'flex', flexDirection:'column', gap:8 },
   empty:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px', gap:12, textAlign:'center' },
