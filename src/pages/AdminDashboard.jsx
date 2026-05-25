@@ -27,7 +27,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate()
   const [search,      setSearch]      = useState('')
   const [showModal,   setShowModal]   = useState(false)
-  const [selected,    setSelected]    = useState(null)
+  const [selectedId,  setSelectedId]  = useState(null)
   const [saving,      setSaving]      = useState(false)
   const [form, setForm] = useState({ id_externo:'', cliente_nome:'', cliente_telefone:'', endereco:'', localizacao_carro:'', lat:null, lng:null })
 
@@ -83,7 +83,7 @@ export default function AdminDashboard() {
   }
 
   // Atualiza o pedido selecionado quando orders muda (realtime)
-  const selectedOrder = selected ? orders.find(o => o.id === selected.id) : null
+  const selectedOrder = selectedId ? orders.find(o => o.id === selectedId) : null
 
   return (
     <div style={s.page}>
@@ -148,7 +148,7 @@ export default function AdminDashboard() {
                   : cards.map((order, i) => (
                     <AdminCard key={order.id} order={order} delay={i*0.05}
                       onMove={handleMove}
-                      onClick={() => setSelected(order)} />
+                      onClick={() => setSelectedId(order.id)} />
                   ))
                 }
               </div>
@@ -219,7 +219,7 @@ export default function AdminDashboard() {
       {selectedOrder && (
         <OrderDetailModal
           order={selectedOrder}
-          onClose={() => setSelected(null)}
+          onClose={() => setSelectedId(null)}
           allowCarEdit={false}
         />
       )}
@@ -324,8 +324,8 @@ const s = {
   cardFoot:{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:9, marginTop:3, borderTop:'1px solid var(--border)' },
   cardTime:{ fontSize:10, color:'var(--text-3)' },
   advBtn:{ display:'flex', alignItems:'center', gap:4, padding:'4px 9px', background:'transparent', border:'1px solid var(--accent-border)', borderRadius:6, color:'var(--accent)', fontSize:11, fontWeight:600 },
-  overlay:{ position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300 },
-  modal:{ width:'100%', maxWidth:460, margin:'0 16px', background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-lg)', overflow:'hidden', boxShadow:'var(--shadow)', maxHeight:'90vh', overflowY:'auto' },
+  overlay:{ position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:500, padding:'0 16px' },
+  modal:{ width:'100%', maxWidth:460, margin:'0 16px', background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-lg)', boxShadow:'var(--shadow)', maxHeight:'90vh', overflowY:'auto', display:'flex', flexDirection:'column' },
   modalHead:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 22px', borderBottom:'1px solid var(--border)', position:'sticky', top:0, background:'var(--bg-2)', zIndex:10 },
   modalTitle:{ fontSize:15, fontWeight:700, color:'var(--text-1)' },
   modalBody:{ padding:'18px 22px', display:'flex', flexDirection:'column', gap:14 },

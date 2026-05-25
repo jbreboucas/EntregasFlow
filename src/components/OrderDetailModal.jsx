@@ -173,15 +173,15 @@ function InfoRow({ icon:Icon, label, children }) {
 }
 
 const s = {
-  overlay: { position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:400, padding:'0' },
-  modal: { width:'100%', maxWidth:500, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'20px 20px 0 0', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'var(--shadow)' },
+  overlay: { position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:400, padding:'16px' },
+  modal: { width:'100%', maxWidth:500, background:'var(--bg-2)', border:'1px solid var(--border-2)', borderRadius:'var(--radius-lg)', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'var(--shadow)' },
   head: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 20px 14px', borderBottom:'1px solid var(--border)', flexShrink:0 },
   headLeft: { display:'flex', alignItems:'center', gap:10 },
   statusDot: { width:10, height:10, borderRadius:'50%', flexShrink:0 },
   orderId: { fontFamily:'var(--mono)', fontSize:13, fontWeight:700, color:'var(--text-1)', marginRight:8 },
   statusPill: { fontSize:11, fontWeight:700, padding:'2px 9px', borderRadius:20 },
   closeBtn: { padding:7, background:'var(--bg-3)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-2)', display:'flex', alignItems:'center' },
-  body: { overflowY:'auto', padding:'18px 20px 32px', display:'flex', flexDirection:'column', gap:20 },
+  body: { overflowY:'auto', overflowX:'hidden', padding:'18px 20px 32px', display:'flex', flexDirection:'column', gap:20, flex:1 },
   clientName: { fontSize:20, fontWeight:900, color:'var(--text-1)', letterSpacing:'-0.4px' },
   infoSection: { display:'flex', flexDirection:'column', gap:0, background:'var(--bg-3)', borderRadius:12, border:'1px solid var(--border)', overflow:'hidden' },
   infoRow: { display:'flex', alignItems:'flex-start', justifyContent:'space-between', padding:'11px 14px', borderBottom:'1px solid var(--border)', gap:12 },

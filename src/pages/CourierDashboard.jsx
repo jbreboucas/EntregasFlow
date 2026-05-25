@@ -34,7 +34,7 @@ export default function CourierDashboard() {
   const [tab, setTab]           = useState('available')
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving]     = useState(false)
-  const [selected, setSelected] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
   const [form, setForm]         = useState({
     id_externo: '', cliente_nome: '', cliente_telefone: '', endereco: '',
     localizacao_carro: '', lat: null, lng: null
@@ -100,7 +100,7 @@ export default function CourierDashboard() {
   }
 
   const shown = tab === 'available' ? available : myOrders
-  const selectedOrder = selected ? orders.find(o => o.id === selected.id) : null
+  const selectedOrder = selectedId ? orders.find(o => o.id === selectedId) : null
 
   return (
     <div style={s.page}>
@@ -170,7 +170,7 @@ export default function CourierDashboard() {
               onAssociate={() => associate(order.id)}
               onNavigate={() => navigate(`/map/single/${order.id}`)}
               onConfirm={() => navigate(`/confirm/${order.id}`)}
-              onClick={() => setSelected(order)} />
+              onClick={() => setSelectedId(order.id)} />
           ))
         }
       </div>
@@ -247,7 +247,7 @@ export default function CourierDashboard() {
       {selectedOrder && (
         <OrderDetailModal
           order={selectedOrder}
-          onClose={() => setSelected(null)}
+          onClose={() => setSelectedId(null)}
           allowCarEdit={!selectedOrder.entregador_id || selectedOrder.entregador_id !== user?.id}
         />
       )}
@@ -288,7 +288,7 @@ function Stat({ icon:Icon, color, value, label }) {
 
 function Tab({ active, onClick, label, count, countColor }) {
   return (
-    <button style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 14px', borderRadius:8, fontSize:13, fontWeight:500, color: active ? 'var(--text-1)' : 'var(--text-3)', background: active ? 'var(--bg-3)' : 'transparent', boxShadow: active ? 'inset 0 0 0 1px var(--border-2)' : 'none' }} onClick={onClick}>
+    <button style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 14px', borderRadius:8, fontSize:13, fontWeight:500, color: active ? 'var(--text-1)' : 'var(--text-3)', background: active ? 'var(--bg-3)' : 'transparent', boxShadow: active ? 'inset 0 0 0 1px var(--border-2)' : 'none' }} onClick={onClick} onClickCapture={e => { if (e.target.closest("button")) e.stopPropagation() }}>
       {label}
       {count > 0 && <span style={{ fontSize:11, fontWeight:700, padding:'1px 6px', borderRadius:10, background:'var(--bg-3)', color: countColor }}>{count}</span>}
     </button>
@@ -298,7 +298,7 @@ function Tab({ active, onClick, label, count, countColor }) {
 function CourierCard({ order, delay, isAvailable, onAssociate, onNavigate, onConfirm, onClick }) {
   const cfg = STATUS_CONFIG[order.status]
   return (
-    <div style={{ background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, opacity:0, animationDelay:`${delay}s`, cursor:'pointer' }} className="slide-in" onClick={onClick}>
+    <div style={{ background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, opacity:0, animationDelay:`${delay}s`, cursor:'pointer' }} className="slide-in" onClick={onClick} onClickCapture={e => { if (e.target.closest("button")) e.stopPropagation() }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <span style={{ fontFamily:'var(--mono)', fontSize:10, fontWeight:600, color:'var(--text-3)', letterSpacing:'0.5px' }}># {order.id}</span>
         <span style={{ padding:'2px 9px', borderRadius:20, fontSize:10, fontWeight:700, color: cfg.color, background: cfg.bg }}>{cfg.label}</span>
