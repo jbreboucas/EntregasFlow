@@ -65,6 +65,7 @@ export default function MapView() {
   const [routeState,  setRouteState]  = useState(ROUTE_IDLE)
   const [showReorder, setShowReorder] = useState(false)
   const [dragOver,    setDragOver]    = useState(null)
+  const [mapReady,    setMapReady]    = useState(false)
 
   const mapRef     = useRef(null)
   const mapInst    = useRef(null)
@@ -98,7 +99,8 @@ export default function MapView() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map)
     L.control.zoom({ position:'bottomright' }).addTo(map)
     mapInst.current = map
-    return () => { map.remove(); mapInst.current = null; routeBuilt.current = false }
+    setMapReady(true)
+    return () => { map.remove(); mapInst.current = null; routeBuilt.current = false; setMapReady(false) }
   }, [pedidos])
 
   // ── GPS ───────────────────────────────────────────────────────────────────────
@@ -159,11 +161,11 @@ export default function MapView() {
   }, [pedidos, order, activeIdx])
 
   useEffect(() => {
-    if (!mapInst.current || pedidos.length===0 || routeBuilt.current) return
+    if (!mapReady || pedidos.length === 0 || routeBuilt.current) return
+    if (!gpsReady) return   // aguarda GPS ou timeout
     routeBuilt.current = true
-    if (gpsPos) buildRoutes(gpsPos)
-    else { const t = setTimeout(()=>buildRoutes(null),2000); return ()=>clearTimeout(t) }
-  }, [mapInst.current, pedidos, gpsPos])
+    buildRoutes(gpsPos || null)
+  }, [mapReady, pedidos, gpsReady, gpsPos, buildRoutes])
 
   const selectStop = (seqIdx) => {
     setActiveIdx(seqIdx)
